@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "crates/fabric-types",
+]
+resolver = "2"
