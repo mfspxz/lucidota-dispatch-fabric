@@ -45,15 +45,16 @@ impl LimitSet {
 
     /// Set (or replace) one limit dimension.
     pub fn set(&mut self, limit: QuotaLimit) {
-        let _ = limit;
-        todo!("T041: implement limit set")
+        match self.limits.iter_mut().find(|l| l.kind == limit.kind) {
+            Some(existing) => *existing = limit,
+            None => self.limits.push(limit),
+        }
     }
 
     /// Look up one dimension. Returns None when the dimension was never set
     /// (unknown), which is distinct from a zero limit.
     pub fn get(&self, kind: LimitKind) -> Option<&QuotaLimit> {
-        let _ = kind;
-        todo!("T041: implement limit lookup")
+        self.limits.iter().find(|l| l.kind == kind)
     }
 
     /// All six kinds, each with its current setting (possibly unknown).
@@ -66,5 +67,67 @@ impl LimitSet {
             LimitKind::Cost,
             LimitKind::Cooldown,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limit(kind: LimitKind, max: Option<u64>, window_ms: Option<u64>) -> QuotaLimit {
+        QuotaLimit { kind, max, window_ms }
+    }
+
+    #[test]
+    fn set_and_get_round_trip() {
+        let mut s = LimitSet::new();
+        s.set(limit(LimitKind::RequestRate, Some(60), Some(60_000)));
+        let got = s.get(LimitKind::RequestRate).unwrap();
+        assert_eq!(got.max, Some(60));
+        assert_eq!(got.window_ms, Some(60_000));
+    }
+
+    #[test]
+    fn unset_dimension_is_unknown_not_zero() {
+        let s = LimitSet::new();
+        assert!(s.get(LimitKind::TokenRate).is_none());
+        // unknown is distinct from an explicit zero limit
+        let mut s2 = LimitSet::new();
+        s2.set(limit(LimitKind::TokenRate, Some(0), None));
+        assert_eq!(s2.get(LimitKind::TokenRate).unwrap().max, Some(0));
+    }
+
+    #[test]
+    fn set_replaces_same_dimension() {
+        let mut s = LimitSet::new();
+        s.set(limit(LimitKind::Concurrency, Some(4), None));
+        s.set(limit(LimitKind::Concurrency, Some(8), None));
+        assert_eq!(s.get(LimitKind::Concurrency).unwrap().max, Some(8));
+    }
+
+    #[test]
+    fn dimensions_are_independent() {
+        let mut s = LimitSet::new();
+        s.set(limit(LimitKind::RequestRate, Some(60), Some(60_000)));
+        s.set(limit(LimitKind::Cost, None, None)); // unknown cost limit
+        assert_eq!(s.get(LimitKind::RequestRate).unwrap().max, Some(60));
+        assert!(s.get(LimitKind::Cost).unwrap().max.is_none());
+        assert!(s.get(LimitKind::DailyUse).is_none());
+    }
+
+    #[test]
+    fn unknown_limit_survives_serde() {
+        let mut s = LimitSet::new();
+        s.set(limit(LimitKind::Cooldown, None, Some(5_000)));
+        let json = serde_json::to_string(&s).unwrap();
+        let back: LimitSet = serde_json::from_str(&json).unwrap();
+        let got = back.get(LimitKind::Cooldown).unwrap();
+        assert!(got.max.is_none());
+        assert_eq!(got.window_ms, Some(5_000));
+    }
+
+    #[test]
+    fn all_kinds_covers_six_dimensions() {
+        assert_eq!(LimitSet::all_kinds().len(), 6);
     }
 }
