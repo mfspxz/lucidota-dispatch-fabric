@@ -1,0 +1,18 @@
+{
+  "task_id": "T093",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:29c9d84280a7590b08e46fda427fc9ee64b07ca554ce1d57a9e43b9e87619441"
+  ],
+  "notes": "Typed outcomes: Passed / TestFailed{exit_code} vs InfraFailed{SpawnFailed,TimeoutKilled,OutputCapExceeded,TerminatedBySignal,OutputDrainStalled}"
+}

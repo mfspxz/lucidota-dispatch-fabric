@@ -1,0 +1,18 @@
+{
+  "task_id": "T094",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:036445f3f52206bdd901521b48c63a5260ab34028a19e50016fbd77fd28d8b35"
+  ],
+  "notes": "libtest + PASS:/FAIL:/SKIP: normalization; unrecognized lines preserved verbatim as unparsed, summary lines never counted"
+}
