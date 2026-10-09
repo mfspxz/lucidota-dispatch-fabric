@@ -1,0 +1,16 @@
+{
+  "task_id": "T053",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (isolated harness of the 5 modules, real disk: ~/workspace/g1-harness-tmp)"
+  ],
+  "exit_codes": [
+    0
+  ],
+  "artifact_digests": [
+    "sha256:fc927742bb03ce529c3be64600fab9a7e3f65a1d74fab123641e8fb6120dfd1a"
+  ],
+  "notes": "Deterministic priority_score from PriorityConfig weights over risk, critical depth, age, per-class weight, minus duration penalty; rank_tasks tie-breaks by TaskId; config validate() rejects non-finite weights. 5 tests. Full `cargo test -p fabric-graph` awaits sibling cells T056-T060 (lib.rs references their modules); verified via harness: 22 passed, 0 failed."
+}
