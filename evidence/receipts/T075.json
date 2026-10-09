@@ -1,0 +1,10 @@
+{
+  "task_id": "T075",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test -p fabric-workspace", "cargo clippy -p fabric-workspace --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:7a2d8e854ef2a5df89ae7e6232ea2ba2a7e22f1b71d952755024283ee93df30a"],
+  "notes": "hash.rs: sha256 ContentHash, hash_bytes/hash_patch (CRLF-normalized)/hash_file, seal_file + verify_sealed detecting size and content mutation as Conflict; 7 tests green."
+}

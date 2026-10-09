@@ -1,0 +1,10 @@
+{
+  "task_id": "T077",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test -p fabric-workspace", "cargo clippy -p fabric-workspace --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:4b8a5046b02cc126e6a3a6f572b69ea645d63ed3bdfa90413f32e903f64d6e57"],
+  "notes": "integrate.rs: IntegrationPlan with canonical digest, build_integration_workspace verifies all commits first, fresh branch pinned to base, ordered --no-ff merges recording full parent SHAs; conflict aborts merge and removes only the fresh worktree; 4 tests green incl. real merge + conflict cases."
+}
