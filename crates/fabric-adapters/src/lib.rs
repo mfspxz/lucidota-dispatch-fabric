@@ -11,6 +11,7 @@
 pub mod copilot;
 pub mod errors;
 pub mod gemini;
+pub mod harness;
 pub mod http;
 pub mod local;
 pub mod normalize;
