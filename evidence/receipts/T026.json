@@ -1,0 +1,16 @@
+{
+  "task_id": "T026",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (via /tmp/r2test harness wiring the 5 real module files against frozen endpoints.rs + fabric-types)"
+  ],
+  "exit_codes": [
+    0
+  ],
+  "artifact_digests": [
+    "sha256:852c7f16e57c46e7e2bfd873b948e07602327b043312d7e0713cc222c280f40a"
+  ],
+  "notes": "success.rs: evidence-based per-(endpoint,class) success rates; only ArtifactRef-linked outcomes recordable (no self-report API); evidence digests deduplicated; unknown pairs yield None, never 0. Provider routing: went direct (fail-fast) \u2014 modules are tightly interface-bound; DeepSeek generation would have needed identical context. 29 tests pass, 2 ignored pending R1 EndpointRegistry::register."
+}
