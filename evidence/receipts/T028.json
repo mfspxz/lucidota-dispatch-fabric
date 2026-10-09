@@ -1,0 +1,16 @@
+{
+  "task_id": "T028",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (via /tmp/r2test harness wiring the 5 real module files against frozen endpoints.rs + fabric-types)"
+  ],
+  "exit_codes": [
+    0
+  ],
+  "artifact_digests": [
+    "sha256:90b4f145868db4023cd49b3b3b78b29bf0d466bd73ecffe9d90733865073eb8e"
+  ],
+  "notes": "context.rs: token estimation via documented ~4 chars/token heuristic, check_fits rejects over-window work per dimension, truncate_prompt_to_fit transforms oversized prompts; output-only overflow errors instead of silent truncation. Provider routing: went direct (fail-fast) \u2014 modules are tightly interface-bound; DeepSeek generation would have needed identical context. 29 tests pass, 2 ignored pending R1 EndpointRegistry::register."
+}
