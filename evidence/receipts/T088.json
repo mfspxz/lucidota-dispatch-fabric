@@ -1,0 +1,18 @@
+{
+  "task_id": "T088",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:3817d4466e2a652e9b6a66afdea4a9bb8b1d30380d50ea6839581d1557269478"
+  ],
+  "notes": "Redactor with substring + regex-lite matchers (groups/alternation supported); [REDACTED:name] replacement; log records pattern names+counts only, never values; conservative credential defaults"
+}

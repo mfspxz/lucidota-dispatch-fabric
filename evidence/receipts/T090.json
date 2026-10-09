@@ -1,0 +1,18 @@
+{
+  "task_id": "T090",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:dad43584b1c612e3db251ec42d47c0bfc2a62eeff1e64bdf041c36c4e7ef32bc"
+  ],
+  "notes": "export_bundle validates hashes + rejects duplicate digests, assigns dense seqs in digest order; restore_bundle re-validates schema version, seq continuity, digests, media types, sizes; tampering -> VerificationFailure"
+}
