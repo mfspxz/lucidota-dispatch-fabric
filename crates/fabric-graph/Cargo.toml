@@ -1,0 +1,11 @@
+[package]
+name = "fabric-graph"
+version = "0.1.0"
+edition = "2021"
+description = "Task graph and queue for the dispatch fabric (T051-T060)"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

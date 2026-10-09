@@ -4,5 +4,9 @@ members = [
     "crates/fabric-spec",
     "crates/fabric-registry",
     "crates/fabric-adapters",
+    "crates/fabric-quota",
+    "crates/fabric-graph",
+    "crates/fabric-dispatch",
+    "crates/fabric-workspace",
 ]
 resolver = "2"

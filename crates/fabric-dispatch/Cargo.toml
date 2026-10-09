@@ -1,0 +1,14 @@
+[package]
+name = "fabric-dispatch"
+version = "0.1.0"
+edition = "2021"
+description = "Dispatcher and runtime for the dispatch fabric (T061-T070)"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+fabric-quota = { path = "../fabric-quota" }
+fabric-registry = { path = "../fabric-registry" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "time", "macros"] }

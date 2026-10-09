@@ -1,0 +1,11 @@
+[package]
+name = "fabric-quota"
+version = "0.1.0"
+edition = "2021"
+description = "Quota and budget engine for the dispatch fabric (T041-T050)"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

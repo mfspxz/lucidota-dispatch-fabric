@@ -1,0 +1,12 @@
+[package]
+name = "fabric-workspace"
+version = "0.1.0"
+edition = "2021"
+description = "Workspace and Git isolation for the dispatch fabric (T071-T078)"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+sha2 = "0.10"
