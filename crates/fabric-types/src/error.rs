@@ -5,6 +5,7 @@
 //! failure, malformed output, conflicts, and verification failure are distinct
 //! variants, never stringly-typed.
 
+use crate::ids::TaskId;
 use thiserror::Error;
 
 /// Structured error for the dispatch fabric (T010).
@@ -49,6 +50,12 @@ pub enum FabricError {
     /// A task class string matched no known class and no Unknown carrier.
     #[error("unknown task class: {0}")]
     UnknownClass(String),
+
+    /// A dependency cycle was detected; `path` is the concrete cycle with
+    /// the first element repeated at the end. (Critic finding: dag.rs must
+    /// be able to return a cycle as a typed error.)
+    #[error("dependency cycle detected")]
+    DependencyCycle { path: Vec<TaskId> },
 }
 
 /// Crate-wide result alias.

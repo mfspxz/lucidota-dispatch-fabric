@@ -74,14 +74,19 @@ impl AdapterError {
     }
 }
 
-/// Bound the detail length; diagnostics stay small and redacted by policy.
+/// Bound the detail length at a UTF-8 character boundary; diagnostics stay
+/// small and redacted by policy. (Critic finding: byte-slicing panics on
+/// non-ASCII input.)
 fn redact_detail(detail: String) -> String {
     const MAX: usize = 512;
     if detail.len() <= MAX {
-        detail
-    } else {
-        format!("{}…[truncated]", &detail[..MAX])
+        return detail;
     }
+    let mut end = MAX;
+    while !detail.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…[truncated]", &detail[..end])
 }
 
 #[cfg(test)]
@@ -100,6 +105,13 @@ mod tests {
     fn detail_is_bounded() {
         let e = AdapterError::fatal(AdapterErrorKind::Unknown, "x".repeat(2000));
         assert!(e.safe_detail.len() < 600);
+    }
+
+    #[test]
+    fn truncation_respects_char_boundaries() {
+        // byte 512 would split the 'é'; must not panic
+        let e = AdapterError::fatal(AdapterErrorKind::Unknown, "a".repeat(511) + "é");
+        assert!(e.safe_detail.len() <= 512 + "…[truncated]".len());
     }
 
     #[test]

@@ -1,5 +1,8 @@
 [workspace]
 members = [
     "crates/fabric-types",
+    "crates/fabric-spec",
+    "crates/fabric-registry",
+    "crates/fabric-adapters",
 ]
 resolver = "2"

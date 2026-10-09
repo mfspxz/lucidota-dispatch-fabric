@@ -367,7 +367,8 @@
         "crates/fabric-spec"
       ],
       "inputs": [
-        "T001.output"
+        "T001.output",
+        "T010.output"
       ],
       "outputs": [
         "T011.implementation",
@@ -375,7 +376,8 @@
         "T011.receipt"
       ],
       "dependencies": [
-        "T001"
+        "T001",
+        "T010"
       ],
       "acceptance_predicates": [
         "T011.objective-implemented",
@@ -625,7 +627,9 @@
         "crates/fabric-spec"
       ],
       "inputs": [
-        "T004.output"
+        "T001.output",
+        "T004.output",
+        "T010.output"
       ],
       "outputs": [
         "T018.implementation",
@@ -633,7 +637,9 @@
         "T018.receipt"
       ],
       "dependencies": [
-        "T004"
+        "T001",
+        "T004",
+        "T010"
       ],
       "acceptance_predicates": [
         "T018.objective-implemented",
@@ -779,8 +785,8 @@
         "crates/fabric-registry"
       ],
       "inputs": [
-        "T003.output",
         "T009.output",
+        "T010.output",
         "T021.output"
       ],
       "outputs": [
@@ -789,8 +795,8 @@
         "T022.receipt"
       ],
       "dependencies": [
-        "T003",
         "T009",
+        "T010",
         "T021"
       ],
       "acceptance_predicates": [
@@ -819,6 +825,7 @@
         "crates/fabric-registry"
       ],
       "inputs": [
+        "T021.output",
         "T022.output"
       ],
       "outputs": [
@@ -827,6 +834,7 @@
         "T023.receipt"
       ],
       "dependencies": [
+        "T021",
         "T022"
       ],
       "acceptance_predicates": [
@@ -891,6 +899,7 @@
         "crates/fabric-registry"
       ],
       "inputs": [
+        "T002.output",
         "T022.output"
       ],
       "outputs": [
@@ -899,6 +908,7 @@
         "T025.receipt"
       ],
       "dependencies": [
+        "T002",
         "T022"
       ],
       "acceptance_predicates": [
@@ -927,6 +937,7 @@
         "crates/fabric-registry"
       ],
       "inputs": [
+        "T002.output",
         "T007.output",
         "T022.output"
       ],
@@ -936,6 +947,7 @@
         "T026.receipt"
       ],
       "dependencies": [
+        "T002",
         "T007",
         "T022"
       ],
@@ -1122,7 +1134,7 @@
       ],
       "inputs": [
         "T009.output",
-        "T010.output"
+        "T039.output"
       ],
       "outputs": [
         "T031.implementation",
@@ -1131,7 +1143,7 @@
       ],
       "dependencies": [
         "T009",
-        "T010"
+        "T039"
       ],
       "acceptance_predicates": [
         "T031.objective-implemented",
@@ -1385,6 +1397,7 @@
         "crates/fabric-adapters"
       ],
       "inputs": [
+        "T006.output",
         "T031.output"
       ],
       "outputs": [
@@ -1393,6 +1406,7 @@
         "T038.receipt"
       ],
       "dependencies": [
+        "T006",
         "T031"
       ],
       "acceptance_predicates": [
@@ -1421,8 +1435,7 @@
         "crates/fabric-adapters"
       ],
       "inputs": [
-        "T010.output",
-        "T031.output"
+        "T010.output"
       ],
       "outputs": [
         "T039.implementation",
@@ -1430,8 +1443,7 @@
         "T039.receipt"
       ],
       "dependencies": [
-        "T010",
-        "T031"
+        "T010"
       ],
       "acceptance_predicates": [
         "T039.objective-implemented",
@@ -2522,7 +2534,8 @@
       ],
       "inputs": [
         "T007.output",
-        "T061.output"
+        "T061.output",
+        "T084.output"
       ],
       "outputs": [
         "T068.implementation",
@@ -2531,7 +2544,8 @@
       ],
       "dependencies": [
         "T007",
-        "T061"
+        "T061",
+        "T084"
       ],
       "acceptance_predicates": [
         "T068.objective-implemented",
@@ -4848,6 +4862,10 @@
       "size": 33
     }
   },
+  "risks": [
+    "policy-undefined: T058/T064/T065/T079/T095 and acceptance invariants reference an authorization policy, but no T001-T100 task defines policy semantics. If reserved spec sections 3-4 lack a policy task, it is silently dropped.",
+    "T068 cross-batch: durable-state recovery depends on T084 (batch 3); T068 cannot pass its gate before I3."
+  ],
   "validation": {
     "passed": true,
     "errors": [],
@@ -4860,33 +4878,25 @@
       "T010",
       "T005",
       "T006",
-      "T011",
       "T004",
       "T021",
       "T029",
-      "T031",
+      "T011",
+      "T039",
       "T007",
       "T081",
-      "T012",
-      "T013",
-      "T015",
       "T016",
       "T017",
       "T018",
       "T056",
       "T082",
       "T022",
-      "T032",
-      "T036",
-      "T038",
-      "T039",
+      "T012",
+      "T013",
+      "T015",
+      "T031",
       "T084",
       "T088",
-      "T014",
-      "T019",
-      "T087",
-      "T091",
-      "T095",
       "T051",
       "T083",
       "T023",
@@ -4896,17 +4906,14 @@
       "T027",
       "T028",
       "T041",
-      "T033",
-      "T034",
-      "T035",
-      "T037",
-      "T045",
-      "T086",
-      "T040",
-      "T089",
-      "T020",
-      "T092",
-      "T096",
+      "T014",
+      "T019",
+      "T087",
+      "T091",
+      "T095",
+      "T032",
+      "T036",
+      "T038",
       "T052",
       "T053",
       "T054",
@@ -4916,37 +4923,48 @@
       "T090",
       "T030",
       "T097",
-      "T061",
       "T042",
       "T043",
       "T044",
       "T046",
       "T048",
-      "T049",
-      "T093",
-      "T094",
-      "T099",
-      "T100",
+      "T089",
+      "T020",
+      "T061",
+      "T092",
+      "T096",
+      "T033",
+      "T034",
+      "T035",
+      "T037",
+      "T040",
+      "T045",
+      "T086",
       "T059",
       "T060",
       "T098",
+      "T047",
+      "T062",
       "T063",
       "T064",
       "T066",
       "T067",
       "T068",
       "T069",
-      "T070",
       "T071",
       "T085",
-      "T047",
-      "T062",
+      "T093",
+      "T094",
+      "T099",
+      "T100",
+      "T049",
+      "T070",
+      "T050",
+      "T065",
       "T072",
       "T073",
       "T074",
       "T079",
-      "T050",
-      "T065",
       "T080",
       "T075",
       "T076",

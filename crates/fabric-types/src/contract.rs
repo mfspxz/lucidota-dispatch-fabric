@@ -10,6 +10,7 @@ use crate::class::TaskClass;
 use crate::error::{FabricError, Result};
 use crate::ids::TaskId;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 /// One testable acceptance condition on a task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +144,10 @@ pub struct TaskContract {
     pub verifiers: Vec<String>,
     pub retry: RetryPolicy,
     pub risk_tier: RiskTier,
+    /// Declared failure path: what happens when attempts exhaust or a
+    /// verifier fails (e.g. "quarantine artifacts, notify governor").
+    /// T017 rejects contracts where this is missing.
+    pub failure_path: Option<String>,
 }
 
 impl TaskContract {
@@ -161,6 +166,7 @@ impl TaskContract {
             verifiers: vec![],
             retry: RetryPolicy::once(),
             risk_tier: RiskTier::Medium,
+            failure_path: None,
         }
     }
 }
@@ -179,6 +185,17 @@ pub struct Builder {
     verifiers: Vec<String>,
     retry: RetryPolicy,
     risk_tier: RiskTier,
+    failure_path: Option<String>,
+}
+
+impl TaskContract {
+    /// Contract version (T085): sha256 over the canonical JSON serialization.
+    /// Stable for a given struct value; no separate version counter to drift.
+    pub fn contract_version(&self) -> String {
+        let json = serde_json::to_string(self).expect("TaskContract serializes");
+        let digest = sha2::Sha256::digest(json.as_bytes());
+        format!("sha256:{digest:x}")
+    }
 }
 
 impl Builder {
@@ -216,6 +233,10 @@ impl Builder {
     }
     pub fn risk_tier(mut self, t: RiskTier) -> Self {
         self.risk_tier = t;
+        self
+    }
+    pub fn failure_path(mut self, p: impl Into<String>) -> Self {
+        self.failure_path = Some(p.into());
         self
     }
 
@@ -275,6 +296,7 @@ impl Builder {
             verifiers: self.verifiers,
             retry: self.retry,
             risk_tier: self.risk_tier,
+            failure_path: self.failure_path,
         })
     }
 }
@@ -317,6 +339,26 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         let back: TaskContract = serde_json::from_str(&json).unwrap();
         assert_eq!(c, back);
+    }
+
+    #[test]
+    fn contract_version_is_stable_digest() {
+        let c = full_builder().build().unwrap();
+        let v1 = c.contract_version();
+        let v2 = c.contract_version();
+        assert_eq!(v1, v2);
+        assert!(v1.starts_with("sha256:"));
+        let other = full_builder().risk_tier(RiskTier::High).build().unwrap();
+        assert_ne!(v1, other.contract_version());
+    }
+
+    #[test]
+    fn failure_path_is_optional_at_build() {
+        // T004 does not require it; T017's validator rejects its absence.
+        let c = full_builder().build().unwrap();
+        assert_eq!(c.failure_path, None);
+        let c2 = full_builder().failure_path("quarantine and notify").build().unwrap();
+        assert_eq!(c2.failure_path.as_deref(), Some("quarantine and notify"));
     }
 
     #[test]
