@@ -1,0 +1,10 @@
+{
+  "task_id": "T074",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test (w1-harness)", "cargo clippy --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:dfe3df78fb7f5d0f024729355859cc7317dbb24ac37888c8dda4217717aa11e1"],
+  "notes": "diff.rs: CapturedDiff::capture snapshots normalized unified patch (tracked via git diff --no-color --no-ext-diff; untracked as synthesized /dev/null patches, binary-aware, 4MiB cap) + changed-file manifest; sha256 patch digest; write_immutable persists diff.patch + manifest.json read-only with content-addressed ArtifactRef. 4 tests green."
+}

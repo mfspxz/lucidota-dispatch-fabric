@@ -1,0 +1,10 @@
+{
+  "task_id": "T072",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test (w1-harness)", "cargo clippy --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:284173e6bf7d97aa5d85ca74960c638f0fe16abd0de42862a740c8bfb5a3be47"],
+  "notes": "scope.rs: check_scope compares changed paths to contract Scope; prefix-boundary matching defeats src-evil tricks; absolute/.. /empty paths are violations; enforce() rejects with PolicyDenied. 5 tests green."
+}
