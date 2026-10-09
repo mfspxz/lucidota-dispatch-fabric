@@ -1,0 +1,18 @@
+{
+  "task_id": "T067",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (d2-verify harness: 5 D2 modules + fabric-types, isolated from fabric-quota)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:fa214b909fbf166fea5ab8b47ad2c2bc4462533ed8bc563f93fd8724c8cd3caf"
+  ],
+  "notes": "progress.rs: in-flight progress board; worker claims informational only, trusted received_ms vs untrusted reported_ms, stale() flags orphan candidates. 6 tests incl. 100%-claim-is-not-verdict. Full-crate `cargo test -p fabric-dispatch` blocked by fabric-quota's unimplemented modules (another cell's scope); flagged for integrator."
+}

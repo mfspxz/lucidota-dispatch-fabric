@@ -1,0 +1,18 @@
+{
+  "task_id": "T068",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (d2-verify harness: 5 D2 modules + fabric-types, isolated from fabric-quota)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:5b98512c3d7f486210144feb661c16410c70a05c7b72ac836e409d0b71fac7e1"
+  ],
+  "notes": "orphan.rs: lease-based orphan recovery via CAS (RUNNING->Cancelled on expired lease, requeue as attempt N+1); minimal DurableState trait defined for the later-batch store, flagged for integrator. 5 tests. Full-crate `cargo test -p fabric-dispatch` blocked by fabric-quota's unimplemented modules (another cell's scope); flagged for integrator."
+}

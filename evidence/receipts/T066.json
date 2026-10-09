@@ -1,0 +1,18 @@
+{
+  "task_id": "T066",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (d2-verify harness: 5 D2 modules + fabric-types, isolated from fabric-quota)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:4e057e7e4b03dac411e879893378769fa6b79c374d382fb4afa1e6d41337ed7c"
+  ],
+  "notes": "output.rs: JSON Schema structural validator (draft 2020-12 subset, local $ref only, hand-rolled pattern engine, no new deps); invalid output rejected with structured errors, never coerced. 13 tests. Full-crate `cargo test -p fabric-dispatch` blocked by fabric-quota's unimplemented modules (another cell's scope); flagged for integrator."
+}

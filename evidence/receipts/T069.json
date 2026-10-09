@@ -1,0 +1,18 @@
+{
+  "task_id": "T069",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (d2-verify harness: 5 D2 modules + fabric-types, isolated from fabric-quota)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:4d774138670ef19acdc916cec78a02322f083e79cd27fbf0290488224ca598a0"
+  ],
+  "notes": "idem.rs: idempotency keys + effect receipts; delivery semantics documented per effect kind (inference at-least-once, artifact at-most-once, external-post at-most-once intent, ledger exactly-once effect). 5 tests. Full-crate `cargo test -p fabric-dispatch` blocked by fabric-quota's unimplemented modules (another cell's scope); flagged for integrator."
+}
