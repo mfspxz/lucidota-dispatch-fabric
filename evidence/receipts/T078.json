@@ -1,0 +1,10 @@
+{
+  "task_id": "T078",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test -p fabric-workspace", "cargo clippy -p fabric-workspace --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:41141b85a4693322dce702c688704dc71fca357b122e02f278e4f45438a1b85b"],
+  "notes": "cleanup.rs: archive_workspace copies logs/patches/receipts/recovery into content-hashed archive + manifest.json; remove_workspace refuses without complete manifest (PolicyDenied) then issues only `git worktree remove` (never --force); 5 tests green."
+}

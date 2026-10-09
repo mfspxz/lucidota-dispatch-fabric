@@ -1,0 +1,10 @@
+{
+  "task_id": "T076",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test -p fabric-workspace", "cargo clippy -p fabric-workspace --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:2cbafc664dcc95fc2a08edb9935d3cbd0c02f4ac1f3f38793df480c7d43650b8"],
+  "notes": "overlap.rs: ChangedPaths normalization, find_overlaps (multi-workspace paths), rust_api_surface heuristic + api_breaks (Removed/SignatureChanged); changed_paths_between is a local minimal git query flagged for rewire to W1 diff::ChangedManifest; 7 tests green."
+}
