@@ -1,0 +1,10 @@
+{
+  "task_id": "T073",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test (w1-harness)", "cargo clippy --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:bccf58dfb88bee40646d5c7a2e38d6193b861245e42ef50b80fc4f133f4c2ea0"],
+  "notes": "meta.rs: AttemptMeta records workspace_id, task_id, attempt, base_commit, branch, spec_revision, worktree HEAD (Option, never invented), unix timestamp; write_json persists attempt-meta.json. 3 tests green."
+}

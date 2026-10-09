@@ -1,0 +1,10 @@
+{
+  "task_id": "T071",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test (w1-harness)", "cargo clippy --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:4b81aa05397fa4c9ac02ec2de486caa5ff08916974fb27e1cf9fbaf87b4da3c4"],
+  "notes": "create_workspace implemented against frozen signature: git worktree add -b <fresh-branch> <path> <pinned-sha>; base resolved via rev-parse --verify; duplicate branch/path rejected with Conflict; main checkout never touched. 5 tests green."
+}
