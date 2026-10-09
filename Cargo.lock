@@ -155,6 +155,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabric-dispatch"
+version = "0.1.0"
+dependencies = [
+ "fabric-quota",
+ "fabric-registry",
+ "fabric-types",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "fabric-graph"
+version = "0.1.0"
+dependencies = [
+ "fabric-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "fabric-quota"
+version = "0.1.0"
+dependencies = [
+ "fabric-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "fabric-registry"
 version = "0.1.0"
 dependencies = [
@@ -180,6 +214,17 @@ dependencies = [
 name = "fabric-types"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "fabric-workspace"
+version = "0.1.0"
+dependencies = [
+ "fabric-types",
  "serde",
  "serde_json",
  "sha2",
