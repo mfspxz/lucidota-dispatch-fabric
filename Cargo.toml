@@ -8,5 +8,7 @@ members = [
     "crates/fabric-graph",
     "crates/fabric-dispatch",
     "crates/fabric-workspace",
+    "crates/fabric-records",
+    "crates/fabric-verify",
 ]
 resolver = "2"

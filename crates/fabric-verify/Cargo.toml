@@ -1,0 +1,11 @@
+[package]
+name = "fabric-verify"
+version = "0.1.0"
+edition = "2021"
+description = "Evidence, verifiers, and verdicts for the dispatch fabric (T086-T100)"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

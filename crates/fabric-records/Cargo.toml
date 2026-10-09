@@ -1,0 +1,12 @@
+[package]
+name = "fabric-records"
+version = "0.1.0"
+edition = "2021"
+description = "Provenance, events, and durable records for the dispatch fabric (T079-T085)"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+sha2 = "0.10"
