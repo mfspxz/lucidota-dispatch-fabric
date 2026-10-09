@@ -33,15 +33,24 @@ pub struct AdapterError {
 
 impl AdapterError {
     /// Build a retryable error with a redacted detail string.
+    ///
+    /// `detail` must already be redacted: no credentials, no raw bodies
+    /// beyond a bounded prefix. This constructor truncates defensively.
     pub fn retryable(kind: AdapterErrorKind, detail: impl Into<String>) -> Self {
-        let _ = detail;
-        todo!("T039: implement retryable error constructor")
+        Self {
+            retryable: true,
+            kind,
+            safe_detail: redact_detail(detail.into()),
+        }
     }
 
     /// Build a non-retryable (fatal) error with a redacted detail string.
     pub fn fatal(kind: AdapterErrorKind, detail: impl Into<String>) -> Self {
-        let _ = detail;
-        todo!("T039: implement fatal error constructor")
+        Self {
+            retryable: false,
+            kind,
+            safe_detail: redact_detail(detail.into()),
+        }
     }
 
     pub fn is_retryable(&self) -> bool {
@@ -50,6 +59,54 @@ impl AdapterError {
 
     /// Map onto the shared structured error taxonomy (T010).
     pub fn to_fabric(&self) -> FabricError {
-        todo!("T039: implement mapping to FabricError")
+        let msg = format!("{:?}: {}", self.kind, self.safe_detail);
+        match self.kind {
+            AdapterErrorKind::Timeout => FabricError::Timeout(msg),
+            AdapterErrorKind::Transport => FabricError::TransportFailure(msg),
+            AdapterErrorKind::MalformedResponse => FabricError::MalformedOutput(msg),
+            AdapterErrorKind::Quota => FabricError::QuotaExhausted(msg),
+            AdapterErrorKind::Auth => FabricError::PolicyDenied(msg),
+            AdapterErrorKind::Cancelled => {
+                FabricError::PolicyDenied(format!("cancelled: {}", self.safe_detail))
+            }
+            AdapterErrorKind::Unknown => FabricError::TransportFailure(msg),
+        }
+    }
+}
+
+/// Bound the detail length; diagnostics stay small and redacted by policy.
+fn redact_detail(detail: String) -> String {
+    const MAX: usize = 512;
+    if detail.len() <= MAX {
+        detail
+    } else {
+        format!("{}…[truncated]", &detail[..MAX])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retryable_flag_survives() {
+        let e = AdapterError::retryable(AdapterErrorKind::Timeout, "slow");
+        assert!(e.is_retryable());
+        let f = AdapterError::fatal(AdapterErrorKind::Auth, "bad key");
+        assert!(!f.is_retryable());
+    }
+
+    #[test]
+    fn detail_is_bounded() {
+        let e = AdapterError::fatal(AdapterErrorKind::Unknown, "x".repeat(2000));
+        assert!(e.safe_detail.len() < 600);
+    }
+
+    #[test]
+    fn maps_to_fabric_taxonomy() {
+        let e = AdapterError::retryable(AdapterErrorKind::Quota, "429");
+        assert!(matches!(e.to_fabric(), FabricError::QuotaExhausted(_)));
+        let e = AdapterError::fatal(AdapterErrorKind::MalformedResponse, "bad json");
+        assert!(matches!(e.to_fabric(), FabricError::MalformedOutput(_)));
     }
 }
