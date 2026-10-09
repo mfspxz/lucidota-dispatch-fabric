@@ -62,7 +62,7 @@ pub fn validate_endpoint(
 mod tests {
     use super::*;
     use crate::endpoints::{ContextWindow, TransportKind};
-    use fabric_types::{EndpointId, ModelId, ProviderId};
+    use fabric_types::{EndpointId, ModelId, ProviderId, QualityTier};
 
     fn endpoint(id: &str) -> Endpoint {
         Endpoint {
@@ -76,6 +76,7 @@ mod tests {
                 output_tokens: 4096,
             },
             structured_output: false,
+            max_quality_tier: QualityTier::High,
             enabled: true,
         }
     }

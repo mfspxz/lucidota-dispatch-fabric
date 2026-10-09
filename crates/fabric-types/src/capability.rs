@@ -8,7 +8,7 @@ use crate::ids::validate_id;
 use serde::{Deserialize, Serialize};
 
 /// Quality tier a task demands from an endpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum QualityTier {
     Low,

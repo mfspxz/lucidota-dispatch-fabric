@@ -82,7 +82,7 @@ pub fn truncate_prompt_to_fit(
 mod tests {
     use super::*;
     use crate::endpoints::{ContextWindow, TransportKind};
-    use fabric_types::{EndpointId, ModelId, ProviderId};
+    use fabric_types::{EndpointId, ModelId, ProviderId, QualityTier};
 
     fn endpoint(in_tok: u64, out_tok: u64) -> Endpoint {
         Endpoint {
@@ -96,6 +96,7 @@ mod tests {
                 output_tokens: out_tok,
             },
             structured_output: false,
+            max_quality_tier: QualityTier::High,
             enabled: true,
         }
     }

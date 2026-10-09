@@ -35,7 +35,7 @@
       "prompt_digest": "sha256:1acee33c218fc24030e82dbfcc374c36e62bd41d76d0a4e67ccb433f21793db5",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T002",
@@ -69,7 +69,7 @@
       "prompt_digest": "sha256:572f8ad2eb37f6e79f211b556a60938402f7137f67b771750fce249816548295",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T003",
@@ -103,7 +103,7 @@
       "prompt_digest": "sha256:139f3042804307b60721015b01d76f774cda662e1f8b497f8d9b4298a9869eef",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T004",
@@ -143,7 +143,7 @@
       "prompt_digest": "sha256:a2aace09c96079a7d883055eb83d71b45964cd347b76118422fca860a6a7985d",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T005",
@@ -179,7 +179,7 @@
       "prompt_digest": "sha256:07316139c6da81796829ea1f300f64e8b696d9de67a2c8b9aa6cb336caa7a11c",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T006",
@@ -215,7 +215,7 @@
       "prompt_digest": "sha256:514ef55a77859c738b89c5321eb005eb8b7c4764be2797e7eb737b05a2651b92",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T007",
@@ -255,7 +255,7 @@
       "prompt_digest": "sha256:689ab5893c84ecc13f6632cd625fc9602371d5f20c39a3eb63f7059e2b0dbf49",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T008",
@@ -289,7 +289,7 @@
       "prompt_digest": "sha256:f4be067d67d0af7e4f8388c15bd525ad452843e375508f935744402c1f789dbd",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T009",
@@ -323,7 +323,7 @@
       "prompt_digest": "sha256:d1c491b8d28007b0d939a9185790a03f44c7ccc0e3977af6be58ad3f2fc5c97b",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T010",
@@ -357,7 +357,7 @@
       "prompt_digest": "sha256:63fbbd007d1d52dcef514ebe2f3d2d796bef7e1d8535a90748606bad3ddea758",
       "batch": "batch-1",
       "section": "A",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T011",
@@ -395,7 +395,7 @@
       "prompt_digest": "sha256:dcb26137419a71c7553c5386e80f679c79b48f30adb4419aa6f40797775590c2",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T012",
@@ -431,7 +431,7 @@
       "prompt_digest": "sha256:8da1a2fbc91499e4e2cfc3936abad81036d4a55cf945fa1f577f0e9a40e566c1",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T013",
@@ -467,7 +467,7 @@
       "prompt_digest": "sha256:0b3e0e159ad289ccb038abb8f824b39c1071f810c9b0aab49f28e32dcd16b116",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T014",
@@ -507,7 +507,7 @@
       "prompt_digest": "sha256:0446492b8d019cb2d793e3a2cc8af95c6e96b17fa022f0441d2d23df5ee90120",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T015",
@@ -545,7 +545,7 @@
       "prompt_digest": "sha256:1511a99cdb687d3310ca2aae5378b0ecd97fdad39a5e29749e512fafa5a40332",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T016",
@@ -581,7 +581,7 @@
       "prompt_digest": "sha256:d24b1ee182ac8a8a7d6b2deb4b85129313cdbf7776a2913de90a220593f7a3b3",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T017",
@@ -617,7 +617,7 @@
       "prompt_digest": "sha256:743beae9fb90b815554c468c4955f6dc879914f426890c4e24312054d5d2c45f",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T018",
@@ -657,7 +657,7 @@
       "prompt_digest": "sha256:5e10d7c159ad8a6feb60eb33179d53a71fd3ab517adbd3180bc34cc70b58975f",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T019",
@@ -697,7 +697,7 @@
       "prompt_digest": "sha256:6b8b7527a2c64a3c6263e00c457cedec6ba29d4cd19bae84fa44e72a54ed7e44",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T020",
@@ -739,7 +739,7 @@
       "prompt_digest": "sha256:03e92bc1c708165336d32f5250dd84f85dea697cfa445605815bd773c00f061d",
       "batch": "batch-1",
       "section": "B",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T021",
@@ -775,7 +775,7 @@
       "prompt_digest": "sha256:67e9f8a09184c7e8887cb01d589676b7518e18e9c0a642e5513c74fd2c762bae",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T022",
@@ -815,7 +815,7 @@
       "prompt_digest": "sha256:9434be4292e98c115bb82d70495ea9c5887ac5d97bd3bd0135c1d134ec9da03e",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T023",
@@ -853,7 +853,7 @@
       "prompt_digest": "sha256:bc86d6dd7b71b318d8d717ded5c7a279035a45f9f8831900a82317878b56e0d3",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T024",
@@ -889,7 +889,7 @@
       "prompt_digest": "sha256:61216d57f71d9036c7b90d1acdedb72b4129b03178c5be1964daa67c2568a960",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T025",
@@ -927,7 +927,7 @@
       "prompt_digest": "sha256:7d5adae86ad4a5e1da0d8ed12db3b8bf9064c28170b4c94d96431bfe77ae4a75",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T026",
@@ -967,7 +967,7 @@
       "prompt_digest": "sha256:0c95582e8424472fee035c52d8d92ff921b83ab1ff00d66bb49cc0300ba6c152",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T027",
@@ -1007,7 +1007,7 @@
       "prompt_digest": "sha256:e66bce96808999369c1b5510977f3e256326f726c9cfa16454de662a3bc11a48",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T028",
@@ -1045,7 +1045,7 @@
       "prompt_digest": "sha256:141841f8ff5803463fe3b9f14f495948d36fc3d8fc9e03262634b12143905482",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T029",
@@ -1081,7 +1081,7 @@
       "prompt_digest": "sha256:5a4774e3e804ce5697b96de45ecc49967a1d56027f452ba07f112425565c3bf1",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T030",
@@ -1123,7 +1123,7 @@
       "prompt_digest": "sha256:2511935890f3fad1f4dc337a2b717ee18a5f1f9016b27a721326e478486997fb",
       "batch": "batch-1",
       "section": "C",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T031",
@@ -1161,7 +1161,7 @@
       "prompt_digest": "sha256:a6bd1a0d917f07362c7b1b93a537765bf33f81d6a0aa7d8855102ac871c3f853",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T032",
@@ -1199,7 +1199,7 @@
       "prompt_digest": "sha256:bce14b0569ab032e47afe5e5a463eb9a19234102f56a99f6e8418c3dfae69397",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T033",
@@ -1237,7 +1237,7 @@
       "prompt_digest": "sha256:d58751fb1b373fb9b921083fce1d53e2d8e1a86938431485fc32f20232bba393",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T034",
@@ -1275,7 +1275,7 @@
       "prompt_digest": "sha256:c9a23e832729663ac813a3c31fb794cc3c313e37f2fec1c8e1ec245298929e01",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T035",
@@ -1313,7 +1313,7 @@
       "prompt_digest": "sha256:a33d641eee119479a123e947b65a7c0927b8c0757f7495ec20c0abddc8292dd4",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T036",
@@ -1349,7 +1349,7 @@
       "prompt_digest": "sha256:ba7b4a7e4169318a8877a42c14599aecfa48aec1556346b24ad586f207583a02",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T037",
@@ -1387,7 +1387,7 @@
       "prompt_digest": "sha256:1d5c9eb626c1d3bbe8abf2ed18dc1077ad69eb9c07a069d468b60cd587dce831",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T038",
@@ -1425,7 +1425,7 @@
       "prompt_digest": "sha256:f6a9658dca8a39eb9aacc9b2ece576fe8a1753f22ddf923fd60711958db18eeb",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T039",
@@ -1461,7 +1461,7 @@
       "prompt_digest": "sha256:31a9e052d8d0a190c907e469aa1596c36864586bd2b3aed1cce586a80d446a28",
       "batch": "batch-1",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T040",
@@ -5023,5 +5023,15 @@
       "T149",
       "T150"
     ]
+  },
+  "integrations": {
+    "I1": {
+      "batch": "batch-1",
+      "tasks": "T001-T039",
+      "verdict": "PASS",
+      "tests_passed": 234,
+      "tests_failed": 0,
+      "receipt": "evidence/integration/I1.json"
+    }
   }
 }

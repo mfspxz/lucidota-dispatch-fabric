@@ -89,8 +89,9 @@ impl Dag {
                         let pos = path.iter().position(|x| x == &dep).unwrap_or(0);
                         let mut cycle: Vec<TaskId> = path[pos..].to_vec();
                         cycle.push(dep);
-                        let err = CycleError { path: cycle };
-                        return Err(FabricError::Conflict(err.to_string()));
+                        // Critic repair: return the cycle as a typed error
+                        // carrying the concrete path, not a stringified one.
+                        return Err(FabricError::DependencyCycle { path: cycle });
                     }
                     if !done.contains(&dep) {
                         visiting.insert(dep.clone());
@@ -233,15 +234,13 @@ mod tests {
         ];
         let err = Dag::build(&cs).unwrap_err();
         match err {
-            FabricError::Conflict(msg) => {
-                assert!(msg.contains("dependency cycle"), "{msg}");
-                assert!(msg.contains("T001") && msg.contains("T002") && msg.contains("T003"));
-                // entry node repeated at end: "X -> ... -> X"
-                let chain = msg.split("dependency cycle: ").nth(1).unwrap();
-                let nodes: Vec<_> = chain.split(" -> ").collect();
-                assert_eq!(nodes.first(), nodes.last());
+            FabricError::DependencyCycle { path } => {
+                let names: Vec<_> = path.iter().map(|t| t.as_str()).collect();
+                assert!(names.contains(&"T001") && names.contains(&"T002") && names.contains(&"T003"));
+                // entry node repeated at end: [X, ..., X]
+                assert_eq!(names.first(), names.last());
             }
-            other => panic!("expected Conflict, got {other:?}"),
+            other => panic!("expected DependencyCycle, got {other:?}"),
         }
     }
 
@@ -249,7 +248,7 @@ mod tests {
     fn self_dependency_is_a_cycle() {
         let cs = vec![contract("T001", &["T001"])];
         let err = Dag::build(&cs).unwrap_err();
-        assert!(matches!(err, FabricError::Conflict(_)));
+        assert!(matches!(err, FabricError::DependencyCycle { .. }));
     }
 
     #[test]

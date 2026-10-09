@@ -6,10 +6,10 @@
 //! sorted by [`EndpointId`], so identical registry + requirement inputs always
 //! produce identical outputs regardless of registration order.
 //!
-//! Note: `CapabilityRequirement.quality_tier` has no endpoint-side counterpart
-//! in the frozen T022 contract, so it does not filter. No mapping is invented
-//! here (e.g. "larger window implies higher tier" would be fabrication);
-//! flagged for the integrator in the cell report.
+//! Quality-tier matching (I1 integrator repair): `Endpoint.max_quality_tier`
+//! is the endpoint-side counterpart of `CapabilityRequirement.quality_tier`;
+//! an endpoint is eligible only when its ceiling meets or exceeds the
+//! required tier. Tiers order Low < Standard < High.
 
 use crate::endpoints::{Endpoint, EndpointRegistry};
 use fabric_types::{CapabilityRequirement, EndpointId};
@@ -28,6 +28,9 @@ pub fn endpoint_eligible(req: &CapabilityRequirement, endpoint: &Endpoint) -> bo
         return false;
     }
     if req.structured_output && !endpoint.structured_output {
+        return false;
+    }
+    if endpoint.max_quality_tier < req.quality_tier {
         return false;
     }
     if let Some(n) = req.context_budget.max_input_tokens {
@@ -67,7 +70,14 @@ mod tests {
     use crate::endpoints::{ContextWindow, TransportKind};
     use fabric_types::{ContextBudget, ModelId, ProviderId, QualityTier};
 
-    fn endpoint(id: &str, caps: &[&str], structured: bool, in_tok: u64, out_tok: u64) -> Endpoint {
+    fn endpoint(
+        id: &str,
+        caps: &[&str],
+        structured: bool,
+        in_tok: u64,
+        out_tok: u64,
+        tier: QualityTier,
+    ) -> Endpoint {
         Endpoint {
             id: EndpointId::new(id).unwrap(),
             provider: ProviderId::new("p").unwrap(),
@@ -79,6 +89,7 @@ mod tests {
                 output_tokens: out_tok,
             },
             structured_output: structured,
+            max_quality_tier: tier,
             enabled: true,
         }
     }
@@ -100,36 +111,36 @@ mod tests {
 
     #[test]
     fn eligible_when_all_requirements_met() {
-        let e = endpoint("ep-a", &["coding", "review"], true, 8000, 2000);
+        let e = endpoint("ep-a", &["coding", "review"], true, 8000, 2000, QualityTier::High);
         assert!(endpoint_eligible(&req(), &e));
     }
 
     #[test]
     fn rejects_disabled_endpoint() {
-        let mut e = endpoint("ep-a", &["coding"], true, 8000, 2000);
+        let mut e = endpoint("ep-a", &["coding"], true, 8000, 2000, QualityTier::High);
         e.enabled = false;
         assert!(!endpoint_eligible(&req(), &e));
     }
 
     #[test]
     fn rejects_missing_capability() {
-        let e = endpoint("ep-a", &["review"], true, 8000, 2000);
+        let e = endpoint("ep-a", &["review"], true, 8000, 2000, QualityTier::High);
         assert!(!endpoint_eligible(&req(), &e));
     }
 
     #[test]
     fn rejects_structured_output_mismatch() {
-        let e = endpoint("ep-a", &["coding"], false, 8000, 2000);
+        let e = endpoint("ep-a", &["coding"], false, 8000, 2000, QualityTier::High);
         assert!(!endpoint_eligible(&req(), &e));
     }
 
     #[test]
     fn rejects_insufficient_context_window() {
         // input window too small
-        let e = endpoint("ep-a", &["coding"], true, 100, 2000);
+        let e = endpoint("ep-a", &["coding"], true, 100, 2000, QualityTier::High);
         assert!(!endpoint_eligible(&req(), &e));
         // output window too small
-        let e = endpoint("ep-a", &["coding"], true, 8000, 10);
+        let e = endpoint("ep-a", &["coding"], true, 8000, 10, QualityTier::High);
         assert!(!endpoint_eligible(&req(), &e));
     }
 
@@ -144,16 +155,34 @@ mod tests {
             vec![],
         )
         .unwrap();
-        let e = endpoint("ep-a", &["coding"], false, 1, 1);
+        let e = endpoint("ep-a", &["coding"], false, 1, 1, QualityTier::High);
         assert!(endpoint_eligible(&r, &e));
     }
 
     #[test]
-    #[ignore = "requires R1 cell: EndpointRegistry::register"]
     fn match_endpoints_is_deterministic_and_sorted() {
-        // End-to-end check once the registry is implemented: register
-        // endpoints in scrambled order, assert sorted eligible output and
-        // stability across repeated calls.
-        let _ = (req(), EndpointRegistry::new());
+        let mut reg = EndpointRegistry::new();
+        for id in ["ep-c", "ep-a", "ep-b"] {
+            reg.register(endpoint(id, &["coding"], true, 8000, 2000, QualityTier::High))
+                .unwrap();
+        }
+        // a low-tier endpoint is registered but must not match a Standard req
+        reg.register(endpoint("ep-0", &["coding"], true, 8000, 2000, QualityTier::Low))
+            .unwrap();
+        let first = match_endpoints(&req(), &reg);
+        let second = match_endpoints(&req(), &reg);
+        assert_eq!(first, second);
+        let ids: Vec<_> = first.iter().map(|e| e.as_str()).collect();
+        assert_eq!(ids, vec!["ep-a", "ep-b", "ep-c"]);
+    }
+
+    #[test]
+    fn rejects_insufficient_quality_tier() {
+        // req() demands Standard; a Low-ceiling endpoint is ineligible,
+        // a High-ceiling endpoint is eligible.
+        let low = endpoint("ep-low", &["coding"], true, 8000, 2000, QualityTier::Low);
+        assert!(!endpoint_eligible(&req(), &low));
+        let high = endpoint("ep-high", &["coding"], true, 8000, 2000, QualityTier::High);
+        assert!(endpoint_eligible(&req(), &high));
     }
 }

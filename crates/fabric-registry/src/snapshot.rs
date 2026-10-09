@@ -108,7 +108,7 @@ fn hex_of(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::endpoints::{ContextWindow, TransportKind};
-    use fabric_types::{EndpointId, ModelId, ProviderId};
+    use fabric_types::{EndpointId, ModelId, ProviderId, QualityTier};
 
     fn endpoint(id: &str) -> Endpoint {
         Endpoint {
@@ -122,6 +122,7 @@ mod tests {
                 output_tokens: 2000,
             },
             structured_output: true,
+            max_quality_tier: QualityTier::High,
             enabled: true,
         }
     }
@@ -170,8 +171,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires R1 cell: EndpointRegistry::register"]
     fn capture_reads_registry_in_id_order() {
-        let _ = EndpointRegistry::new();
+        let mut reg = EndpointRegistry::new();
+        for id in ["ep-c", "ep-a", "ep-b"] {
+            reg.register(endpoint(id)).unwrap();
+        }
+        let snap = RegistrySnapshot::capture(&reg, 3, 0);
+        let ids: Vec<_> = snap.endpoints().iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec!["ep-a", "ep-b", "ep-c"]);
+        assert_eq!(snap.version(), 3);
     }
 }

@@ -140,9 +140,9 @@ fn map_provider_error(err: &serde_json::Value) -> AdapterError {
     let detail = format!("{status}/{code}: {message}");
     if code == 429 || status == "RESOURCE_EXHAUSTED" {
         AdapterError::retryable(AdapterErrorKind::Quota, detail)
-    } else if code == 401 || code == 403 {
-        AdapterError::fatal(AdapterErrorKind::Auth, detail)
-    } else if code == 400 && message.contains("API key not valid") {
+    } else if code == 401 || code == 403
+        || (code == 400 && message.contains("API key not valid"))
+    {
         AdapterError::fatal(AdapterErrorKind::Auth, detail)
     } else {
         AdapterError::fatal(AdapterErrorKind::Unknown, detail)

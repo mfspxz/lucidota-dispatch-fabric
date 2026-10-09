@@ -6,7 +6,7 @@
 //! Worker R1: replace the `todo!()` bodies with production implementations.
 //! Public signatures are frozen; add private helpers freely.
 
-use fabric_types::{EndpointId, FabricError, ModelId, ProviderId, Result};
+use fabric_types::{EndpointId, FabricError, ModelId, ProviderId, QualityTier, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -36,6 +36,11 @@ pub struct Endpoint {
     pub capabilities: Vec<String>,
     pub context_window: ContextWindow,
     pub structured_output: bool,
+    /// Highest quality tier this endpoint can serve. Matching requires
+    /// `max_quality_tier >=` the required tier. (I1 integrator repair: the
+    /// T027 quality-tier gap — the frozen T022 contract had no endpoint-side
+    /// counterpart for `CapabilityRequirement.quality_tier`.)
+    pub max_quality_tier: QualityTier,
     pub enabled: bool,
 }
 
@@ -100,6 +105,7 @@ mod tests {
                 output_tokens: 4096,
             },
             structured_output: false,
+            max_quality_tier: QualityTier::High,
             enabled,
         }
     }
