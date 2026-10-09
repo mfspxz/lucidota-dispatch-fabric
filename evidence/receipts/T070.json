@@ -1,0 +1,18 @@
+{
+  "task_id": "T070",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (d2-verify harness: 5 D2 modules + fabric-types, isolated from fabric-quota)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:9345c3dd506de0c28ba2cce6cab742d1f74b38d6951c0f6c9a59b46cb30d9c68"
+  ],
+  "notes": "metrics.rs: queue wait, service time, retries, errors, utilization (None when capacity unknown), sliding-window throughput per (class, endpoint). 6 tests. Full-crate `cargo test -p fabric-dispatch` blocked by fabric-quota's unimplemented modules (another cell's scope); flagged for integrator."
+}
