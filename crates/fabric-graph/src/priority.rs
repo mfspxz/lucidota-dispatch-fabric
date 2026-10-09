@@ -224,8 +224,10 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_weights() {
-        let mut cfg = PriorityConfig::default();
-        cfg.risk_weight = f64::NAN;
+        let cfg = PriorityConfig {
+            risk_weight: f64::NAN,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_err());
     }
 }

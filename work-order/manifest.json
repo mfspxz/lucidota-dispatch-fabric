@@ -1501,7 +1501,7 @@
       "prompt_digest": "sha256:81fa57f68a72129f2be16e7c7f99a7c6c213fb9844a328a7e0395f710db3f321",
       "batch": "batch-2",
       "section": "D",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T041",
@@ -1537,7 +1537,7 @@
       "prompt_digest": "sha256:a431e06846c2748d4abf0dd77d828704bdf8afdc07d4b2d0bdf1abe40fd96657",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T042",
@@ -1573,7 +1573,7 @@
       "prompt_digest": "sha256:84818acb19dac54f2efe93df462ab09469265afa77ff131b9e507e0847a16836",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T043",
@@ -1609,7 +1609,7 @@
       "prompt_digest": "sha256:ad7cda0891d93a131d4058bb9957c944245e8daafc8e3dd0fe516678c41cad3c",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T044",
@@ -1645,7 +1645,7 @@
       "prompt_digest": "sha256:60c250e4c3534be3c8ab4d5e4f07123cda7b83c91c0bbbde8ed748dc0b58b2a3",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T045",
@@ -1683,7 +1683,7 @@
       "prompt_digest": "sha256:211de4af89b3c09ebe40b3c93497b76007a6bf4d6b8fe2ac3ab57947a878376e",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T046",
@@ -1719,7 +1719,7 @@
       "prompt_digest": "sha256:17313eaaa36af94d2a5bc4bd1d95e490f38c21723832d3d2957a7628e5bf7a92",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T047",
@@ -1757,7 +1757,7 @@
       "prompt_digest": "sha256:b96d1b057b2245ae88e2a1a45aeb5cd906500c261014e5f2e2a617d10d82b991",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T048",
@@ -1793,7 +1793,7 @@
       "prompt_digest": "sha256:0dced37859cc805de3ec597aba9a8a5f1989fbe39579366aec13af36e3df01de",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T049",
@@ -1831,7 +1831,7 @@
       "prompt_digest": "sha256:f277a4a9982e2ea35bf027f3821f16e91bea7ad7c8b4da92bf9d6a54556b9add",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T050",
@@ -1871,7 +1871,7 @@
       "prompt_digest": "sha256:4f8aae212778c040ed8914286cea033fd36f91bf4213a5b2b28576b572d58329",
       "batch": "batch-2",
       "section": "E",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T051",
@@ -1909,7 +1909,7 @@
       "prompt_digest": "sha256:4732bb2c122f65cc1e8566415462f2fd58ea4515ca3ab28d9c00d7af49ad108f",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T052",
@@ -1949,7 +1949,7 @@
       "prompt_digest": "sha256:9451cad496cd9acc6b6d68b0990514a73380e0bdb696bbdea01f32b8196692bd",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T053",
@@ -1987,7 +1987,7 @@
       "prompt_digest": "sha256:bfaa6376026d3ce1c7f7c749c576b84aeee413f3115aece638488a54b7a5a293",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T054",
@@ -2025,7 +2025,7 @@
       "prompt_digest": "sha256:7e329373a3ac207dd004163171c1b2fdc5d4b4b8c3b21474ae3de2334511a38f",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T055",
@@ -2063,7 +2063,7 @@
       "prompt_digest": "sha256:095f4de79a53d5d401c4105e47cf73c8001dfd227368fabfe5b1c4d512cb08ad",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T056",
@@ -2101,7 +2101,7 @@
       "prompt_digest": "sha256:649d117da88d724b5531960960a9c503fe212a1d70a7e2bc8a41217d4f8f1fc9",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T057",
@@ -2137,7 +2137,7 @@
       "prompt_digest": "sha256:408a57823231ff222c968847cfc6ead08e54dfc8279e9fc62b479891ab44e90c",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T058",
@@ -2175,7 +2175,7 @@
       "prompt_digest": "sha256:57187a2c43401bf56cc553afea66cfe4ca29788b6eccdf7ba4d7c7ec516bffcf",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T059",
@@ -2213,7 +2213,7 @@
       "prompt_digest": "sha256:6563fd04342f33d81dfa8ce777c1c85907ed7ee7364d5de143f49bfd8e835f46",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T060",
@@ -2251,7 +2251,7 @@
       "prompt_digest": "sha256:7460d9b8b875070b67c598b744b4cbda02d6338f6c0d2ec14a94f8b353e7f1cf",
       "batch": "batch-2",
       "section": "F",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T061",
@@ -2293,7 +2293,7 @@
       "prompt_digest": "sha256:dabdde358450c8609855ab1a2e4c44276dfe5532cabd1d268d6a754ae88545c3",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T062",
@@ -2335,7 +2335,7 @@
       "prompt_digest": "sha256:a1089225f84570286fd1225d06b5afc53e09613d98d016f1c2a4d80a8c5e34cd",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T063",
@@ -2373,7 +2373,7 @@
       "prompt_digest": "sha256:e8abcbfe9df9bf931c37a95c6df1bfae3caf008776b7742df7ee66634184e6dc",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T064",
@@ -2411,7 +2411,7 @@
       "prompt_digest": "sha256:9b52d7c7741a06850834e010914e35a78d034000b3b7545e9134f9e28f420342",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T065",
@@ -2449,7 +2449,7 @@
       "prompt_digest": "sha256:3fbf52f22128f149c2ae2c5d6052686e312a93953e35349a7aff755def5d8b01",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T066",
@@ -2487,7 +2487,7 @@
       "prompt_digest": "sha256:53a8e69b1a87b9db21d72db94c9d2ce3686b505549491d65adbab1ee8d28f942",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T067",
@@ -2523,7 +2523,7 @@
       "prompt_digest": "sha256:f040d08bc481d54fd790813a1430507eea7d94e77cf22b7652176681f9a5b3be",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T068",
@@ -2563,7 +2563,7 @@
       "prompt_digest": "sha256:c68dfb8dc7fcab52fcf76c81c4aa2517349dbebbc1663fcb0bfa4fabb4101c0d",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T069",
@@ -2601,7 +2601,7 @@
       "prompt_digest": "sha256:86bae2b6d3f76861a19b3304d8dba90fbac0ec91030c3b0405c7fe264136e385",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T070",
@@ -2639,7 +2639,7 @@
       "prompt_digest": "sha256:c0c34a5eff51c11f207561cb9bbc5888ac5287aafddad15e3c804540c0142257",
       "batch": "batch-2",
       "section": "G",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T071",
@@ -2675,7 +2675,7 @@
       "prompt_digest": "sha256:9a8424710e846ab221b6aadc8fe2c1c9e235979d7e1a14d52061dc2a0f612641",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T072",
@@ -2713,7 +2713,7 @@
       "prompt_digest": "sha256:7546a155127ad68237f97eb2c786c05a8fc3a0c0921f6a16e615fa4f5430b0f5",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T073",
@@ -2751,7 +2751,7 @@
       "prompt_digest": "sha256:e8eac8a6c0943e20a1784366a8b9c077535a2a8c29c8be7fcfcf0d50c1fb7a7b",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T074",
@@ -2789,7 +2789,7 @@
       "prompt_digest": "sha256:a21e2928ef7c045f8ff37562d73240cf28c22639556fcd6e6885ea704aa34e47",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T075",
@@ -2827,7 +2827,7 @@
       "prompt_digest": "sha256:f4768d6bb65cfafd2d61448a36f5bd83ce1c15e3d2ce10e2b4d4eeeac63e63f0",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T076",
@@ -2865,7 +2865,7 @@
       "prompt_digest": "sha256:3478e2ee954bfc98230ff9092871609ec1bf0d74631472affcd22dd8ad2b2ea6",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T077",
@@ -2903,7 +2903,7 @@
       "prompt_digest": "sha256:4bdb057472ecaa5aa951ade22cba05d18c6423a57fc9c89f235f5eb0463bc49d",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T078",
@@ -2941,7 +2941,7 @@
       "prompt_digest": "sha256:5113ffc57bd1edff56494c63cac4727dd7b8798b9bb903ae02d1e2853da05e2e",
       "batch": "batch-2",
       "section": "H",
-      "status": "specified"
+      "status": "integrated"
     },
     {
       "stable_id": "T079",
