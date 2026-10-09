@@ -1,0 +1,16 @@
+{
+  "task_id": "T051",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (isolated harness of the 5 modules, real disk: ~/workspace/g1-harness-tmp)"
+  ],
+  "exit_codes": [
+    0
+  ],
+  "artifact_digests": [
+    "sha256:e81f16cd2582754d4389dfe8777e07ccfefc3c9d23a81a8aac648b4813f21b1d"
+  ],
+  "notes": "Implemented frozen TaskGraph bodies: add_node (dup IDs + id/contract mismatch rejected), add_edge (unknown endpoints, self-edges, dup edges rejected), ID-sorted nodes(), (from,to,kind)-sorted edges(), prerequisites() over DependsOn only. 5 tests. Full `cargo test -p fabric-graph` awaits sibling cells T056-T060 (lib.rs references their modules); verified via harness: 22 passed, 0 failed."
+}

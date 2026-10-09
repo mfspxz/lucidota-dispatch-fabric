@@ -1,0 +1,16 @@
+{
+  "task_id": "T055",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (isolated harness of the 5 modules, real disk: ~/workspace/g1-harness-tmp)"
+  ],
+  "exit_codes": [
+    0
+  ],
+  "artifact_digests": [
+    "sha256:063c71b4c92d2c066e0af716b66126eff6af5a10b7e090b85026ff98a1ff5901"
+  ],
+  "notes": "partition_ready groups ready set into BTreeMap<PartitionKey, Vec<TaskId>> keyed by class, sorted capabilities, context budget, isolation needs; missing capability entries land in explicit unknown bucket. 3 tests. Full `cargo test -p fabric-graph` awaits sibling cells T056-T060 (lib.rs references their modules); verified via harness: 22 passed, 0 failed."
+}
