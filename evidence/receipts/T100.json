@@ -1,0 +1,18 @@
+{
+  "task_id": "T100",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (isolated harness, 29 tests)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:18ca0f0006a22bbc43a48ba0c4ba0d8906470f2f7dc3a480b88b6c2267d090fd"
+  ],
+  "notes": "verdict receipts via builder that refuses to finalize with unevaluated predicates; overall Fail > Pass > Blocked > Inconclusive"
+}

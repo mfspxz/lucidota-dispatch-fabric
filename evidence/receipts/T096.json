@@ -1,0 +1,18 @@
+{
+  "task_id": "T096",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (isolated harness, 29 tests)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:d0a9b1db10e5170ec34308cb4eb557608b8f400376f01d45b1b20ed0d5a88495"
+  ],
+  "notes": "requirement coverage reports from predicate outcomes; pass counts only with linked evidence; fail > proven > blocked > unverified"
+}

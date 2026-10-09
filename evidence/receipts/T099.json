@@ -1,0 +1,18 @@
+{
+  "task_id": "T099",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test (isolated harness, 29 tests)",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:faab283861f7e6750fab97eb3fc281065e45ab51fba0c421c97fe712036dd0b1"
+  ],
+  "notes": "verification cache: exact 5-component key match or miss; entries carry full key; deterministic LRU eviction with fixed cap"
+}
