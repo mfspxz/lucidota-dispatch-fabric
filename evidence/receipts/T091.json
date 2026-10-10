@@ -1,0 +1,18 @@
+{
+  "task_id": "T091",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:eb2b7822654867278a3a0e297ad8ed44d3a4b3053c1538a60b6465f3abe65632"
+  ],
+  "notes": "VerifierRegistry bodies: duplicate-ID/empty-command/zero-bound rejection, deterministic (version,command)-sorted lookup"
+}

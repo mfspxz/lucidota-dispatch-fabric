@@ -1,0 +1,18 @@
+{
+  "task_id": "T095",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:11e76efa8cb7b5314f347ac57ab28888c57b3bd738c9059023ee65ed8fd8deb1"
+  ],
+  "notes": "Pure predicate evaluation: missing evidence -> Fail/Inconclusive per on_missing policy, never PASS"
+}

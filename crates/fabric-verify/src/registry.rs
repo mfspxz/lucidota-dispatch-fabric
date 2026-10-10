@@ -11,7 +11,7 @@
 //! Worker V2: replace the `todo!()` bodies with production implementations.
 //! Public signatures are frozen; add private helpers freely.
 
-use fabric_types::{Result, TaskClass};
+use fabric_types::{FabricError, Result, TaskClass};
 use serde::{Deserialize, Serialize};
 
 /// A typed verifier capability, e.g. "cargo-test", "schema-check".
@@ -49,8 +49,38 @@ impl VerifierRegistry {
     /// Register a verifier. Duplicate IDs are rejected. Commands must be
     /// non-empty; timeout and output bounds must be non-zero.
     pub fn register(&mut self, reg: VerifierRegistration) -> Result<()> {
-        let _ = reg;
-        todo!("T091: implement verifier registration")
+        if reg.id.trim().is_empty() {
+            return Err(FabricError::InvalidInput {
+                field: "id",
+                reason: "verifier id must be non-empty".to_string(),
+            });
+        }
+        if reg.command.is_empty() {
+            return Err(FabricError::InvalidInput {
+                field: "command",
+                reason: "verifier argv must be non-empty".to_string(),
+            });
+        }
+        if reg.timeout_ms == 0 {
+            return Err(FabricError::InvalidInput {
+                field: "timeout_ms",
+                reason: "timeout bound must be non-zero".to_string(),
+            });
+        }
+        if reg.max_output_bytes == 0 {
+            return Err(FabricError::InvalidInput {
+                field: "max_output_bytes",
+                reason: "output bound must be non-zero".to_string(),
+            });
+        }
+        if self.registrations.iter().any(|r| r.id == reg.id) {
+            return Err(FabricError::Conflict(format!(
+                "duplicate verifier id '{}'",
+                reg.id
+            )));
+        }
+        self.registrations.push(reg);
+        Ok(())
     }
 
     /// All verifiers serving (class, requirement-capability), sorted by
@@ -60,12 +90,131 @@ impl VerifierRegistry {
         class: &TaskClass,
         capability: &VerifierCapability,
     ) -> Vec<&VerifierRegistration> {
-        let _ = (class, capability);
-        todo!("T091: implement deterministic verifier lookup")
+        let mut out: Vec<&VerifierRegistration> = self
+            .registrations
+            .iter()
+            .filter(|r| r.classes.contains(class) && r.capability == *capability)
+            .collect();
+        out.sort_by(|a, b| {
+            (&a.version, &a.command)
+                .partial_cmp(&(&b.version, &b.command))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        out
     }
 
     /// All registrations, in registration order.
     pub fn all(&self) -> &[VerifierRegistration] {
         &self.registrations
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reg(id: &str, version: &str, classes: Vec<TaskClass>, cap: &str) -> VerifierRegistration {
+        VerifierRegistration {
+            id: id.to_string(),
+            classes,
+            capability: VerifierCapability(cap.to_string()),
+            command: vec!["verify".to_string(), id.to_string()],
+            version: version.to_string(),
+            timeout_ms: 60_000,
+            max_output_bytes: 1_048_576,
+        }
+    }
+
+    #[test]
+    fn register_and_lookup_roundtrip() {
+        let mut r = VerifierRegistry::new();
+        r.register(reg("v1", "1.0.0", vec![TaskClass::Verify], "cargo-test"))
+            .unwrap();
+        let hits = r.lookup(&TaskClass::Verify, &VerifierCapability("cargo-test".into()));
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "v1");
+        assert_eq!(r.all().len(), 1);
+    }
+
+    #[test]
+    fn duplicate_id_rejected() {
+        let mut r = VerifierRegistry::new();
+        r.register(reg("dup", "1.0.0", vec![TaskClass::Verify], "x"))
+            .unwrap();
+        let err = r
+            .register(reg("dup", "2.0.0", vec![TaskClass::Verify], "x"))
+            .unwrap_err();
+        assert!(matches!(err, FabricError::Conflict(_)));
+    }
+
+    #[test]
+    fn empty_command_rejected() {
+        let mut r = VerifierRegistry::new();
+        let mut bad = reg("bad", "1.0.0", vec![TaskClass::Verify], "x");
+        bad.command.clear();
+        let err = r.register(bad).unwrap_err();
+        assert!(matches!(
+            err,
+            FabricError::InvalidInput { field: "command", .. }
+        ));
+    }
+
+    #[test]
+    fn zero_bounds_rejected() {
+        let mut r = VerifierRegistry::new();
+        let mut bad = reg("bad", "1.0.0", vec![TaskClass::Verify], "x");
+        bad.timeout_ms = 0;
+        assert!(matches!(
+            r.register(bad).unwrap_err(),
+            FabricError::InvalidInput {
+                field: "timeout_ms",
+                ..
+            }
+        ));
+        let mut bad2 = reg("bad2", "1.0.0", vec![TaskClass::Verify], "x");
+        bad2.max_output_bytes = 0;
+        assert!(matches!(
+            r.register(bad2).unwrap_err(),
+            FabricError::InvalidInput {
+                field: "max_output_bytes",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn empty_id_rejected() {
+        let mut r = VerifierRegistry::new();
+        let mut bad = reg("ok", "1.0.0", vec![TaskClass::Verify], "x");
+        bad.id = "  ".to_string();
+        assert!(matches!(
+            r.register(bad).unwrap_err(),
+            FabricError::InvalidInput { field: "id", .. }
+        ));
+    }
+
+    #[test]
+    fn lookup_filters_and_sorts_deterministically() {
+        let mut r = VerifierRegistry::new();
+        // Deliberately registered out of order; lookup must sort by (version, command).
+        r.register(reg("c", "2.0.0", vec![TaskClass::Verify], "cargo-test"))
+            .unwrap();
+        r.register(reg("a", "1.0.0", vec![TaskClass::Verify], "cargo-test"))
+            .unwrap();
+        r.register(reg("b", "1.0.0", vec![TaskClass::Verify], "other-cap"))
+            .unwrap();
+        r.register(reg("d", "1.0.0", vec![TaskClass::Implement], "cargo-test"))
+            .unwrap();
+        let hits = r.lookup(&TaskClass::Verify, &VerifierCapability("cargo-test".into()));
+        let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+        // a and c match; a sorts first by version.
+        assert_eq!(ids, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn lookup_miss_returns_empty() {
+        let r = VerifierRegistry::new();
+        let hits = r.lookup(&TaskClass::Verify, &VerifierCapability("nope".into()));
+        assert!(hits.is_empty());
     }
 }
