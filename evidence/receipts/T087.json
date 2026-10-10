@@ -1,0 +1,18 @@
+{
+  "task_id": "T087",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:8536e6ef88ed509817095432d1ae9fee6a3b08d00aef0d5bf11b7ec2a41d0f10"
+  ],
+  "notes": "PredicateLink + LinkageIndex: each acceptance predicate linked to exact evidence digests and verifier id+version; links with no evidence rejected"
+}

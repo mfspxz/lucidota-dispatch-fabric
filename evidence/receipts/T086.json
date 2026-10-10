@@ -1,0 +1,18 @@
+{
+  "task_id": "T086",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": [
+    "cargo test",
+    "cargo clippy --all-targets"
+  ],
+  "exit_codes": [
+    0,
+    0
+  ],
+  "artifact_digests": [
+    "sha256:6edec81d5348cd1e8406795985f5cdfc3c35c8827904c63e21408df81460556b"
+  ],
+  "notes": "ArtifactStore: bounded response-artifact storage (UTF-8-safe truncation with truncated flag + original size), provider request IDs, usage figures (unknown stays None), finish reasons, attempt metadata; digest injected via ContentDigest trait"
+}
