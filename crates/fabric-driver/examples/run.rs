@@ -16,7 +16,6 @@ fn main() {
     let config = DriverConfig {
         manifest_path: PathBuf::from(manifest),
         work_root: PathBuf::from(&work_root),
-        poll_interval_ms: 500,
         max_waves: 10,
         wave_timeout_ms: 120_000,
         // NOTE (cell DRV2, out-of-scope file): the interop scaffold added

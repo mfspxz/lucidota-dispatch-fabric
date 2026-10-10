@@ -175,11 +175,12 @@ impl Driver {
     /// Validation is fail-closed:
     /// - `manifest_path` must exist and be a file (read, not just metadata).
     /// - `work_root` must be creatable (create_dir_all runs now).
-    /// - `poll_interval_ms` must be > 0 (a zero poll interval would busy-spin).
     /// - `max_waves` must be >= 1 (there is no unbounded mode).
     ///
     /// `wave_timeout_ms == 0` is allowed: wait indefinitely (the runner owns
-    /// liveness in that mode).
+    /// liveness in that mode). Receipt waiting is event-driven (filesystem
+    /// notifications), never timer-polled — there is no poll interval to
+    /// configure.
     pub fn new(config: DriverConfig) -> Result<Self, DriverError> {
         if !config.manifest_path.is_file() {
             return Err(DriverError::InvalidConfig(format!(
@@ -200,11 +201,6 @@ impl Driver {
                 config.work_root.display()
             ))
         })?;
-        if config.poll_interval_ms == 0 {
-            return Err(DriverError::InvalidConfig(
-                "poll_interval_ms must be > 0".to_string(),
-            ));
-        }
         if config.max_waves < 1 {
             return Err(DriverError::InvalidConfig(
                 "max_waves must be >= 1".to_string(),
@@ -341,9 +337,8 @@ impl Driver {
             }
             persist_events(&run_dir, &log)?;
 
-            // Wait for receipts.
-            let receipts =
-                inbox.wait_for_receipts(&expected, cfg.poll_interval_ms, cfg.wave_timeout_ms)?;
+            // Wait for receipts (event-driven; no polling).
+            let receipts = inbox.wait_for_receipts(&expected, cfg.wave_timeout_ms)?;
             if receipts.len() < expected.len() {
                 break WaveOutcome::WaveTimeout;
             }
@@ -910,7 +905,6 @@ mod tests {
         DriverConfig {
             manifest_path: manifest.to_path_buf(),
             work_root: dir.join("run"),
-            poll_interval_ms: 10,
             max_waves: 5,
             wave_timeout_ms: 10_000,
             verifiers_path: None,
@@ -927,14 +921,6 @@ mod tests {
         // Manifest missing.
         let mut bad = config_for(&d, &good_manifest);
         bad.manifest_path = d.join("nope.json");
-        assert!(matches!(
-            Driver::new(bad),
-            Err(DriverError::InvalidConfig(_))
-        ));
-
-        // Zero poll interval.
-        let mut bad = config_for(&d, &good_manifest);
-        bad.poll_interval_ms = 0;
         assert!(matches!(
             Driver::new(bad),
             Err(DriverError::InvalidConfig(_))

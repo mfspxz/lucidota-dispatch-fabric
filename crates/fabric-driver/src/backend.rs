@@ -12,7 +12,9 @@
 use crate::driver::DriverError;
 use fabric_dispatch::DispatchEnvelope;
 use fabric_records::store::digest_bytes;
+use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 /// Write side of the dead drop.
@@ -90,41 +92,100 @@ impl Inbox {
         self.dir.join(format!("{envelope_digest}.receipt.json"))
     }
 
-    /// Poll the inbox until every expected digest has a receipt or the
-    /// timeout elapses. Returns the receipts that arrived (possibly fewer
-    /// than expected on timeout). `timeout_ms == 0` waits indefinitely —
-    /// the caller owns liveness in that mode.
+    /// Wait for receipts, driven by filesystem events — never by polling.
     ///
-    /// A receipt file that fails to parse is a typed error naming the file,
-    /// never silently skipped. A receipt whose embedded `envelope_digest`
-    /// disagrees with its filename is a linkage error naming the file.
+    /// Watches the inbox directory with the OS file-notification facility
+    /// (inotify on Linux via the `notify` crate) and rescans the expected
+    /// digests on every event, plus one initial scan on entry so receipts
+    /// that already exist are never missed. Spurious wakeups only cause an
+    /// extra rescan; there is no `thread::sleep` anywhere in this wait path.
+    ///
+    /// Returns the receipts collected (possibly fewer than expected when the
+    /// terminal deadline fires). `timeout_ms == 0` waits indefinitely — the
+    /// caller owns liveness in that mode.
+    ///
+    /// Atomic-write assumption: workers publish receipts by writing a temp
+    /// file and renaming it into place (see `write_atomic`, and the seeder's
+    /// tmp+rename). A rename appears as a single create event for the final
+    /// `*.receipt.json` name, so a file we observe under an expected name is
+    /// complete — never a half-written stream. A receipt file that fails to
+    /// parse is a typed error naming the file, never silently skipped. A
+    /// receipt whose embedded `envelope_digest` disagrees with its filename
+    /// is a linkage error naming the file.
     pub fn wait_for_receipts(
         &self,
         expected_digests: &[String],
-        poll_interval_ms: u64,
         timeout_ms: u64,
     ) -> Result<Vec<ReceiptFile>, DriverError> {
+        // The watcher must exist before the first scan: an event that lands
+        // between watch-start and scan is queued in the channel and triggers
+        // a rescan, so no wakeup is ever missed.
+        let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
+        let mut watcher =
+            RecommendedWatcher::new(move |res| {
+                let _ = tx.send(res);
+            }, NotifyConfig::default())
+            .map_err(|e| {
+                DriverError::Backend(format!("cannot watch inbox {}: {e}", self.dir.display()))
+            })?;
+        watcher
+            .watch(&self.dir, RecursiveMode::NonRecursive)
+            .map_err(|e| {
+                DriverError::Backend(format!("cannot watch inbox {}: {e}", self.dir.display()))
+            })?;
+
         let start = Instant::now();
-        let interval = Duration::from_millis(poll_interval_ms.max(1));
+        let deadline = (timeout_ms > 0).then(|| start + Duration::from_millis(timeout_ms));
 
         loop {
-            let mut collected: Vec<ReceiptFile> = Vec::new();
-            for digest in expected_digests {
-                let path = self.path_for(digest);
-                if path.exists() {
-                    // A present-but-unparseable receipt is a typed error
-                    // naming the file — never silently skipped.
-                    collected.push(self.read_receipt(&path, digest)?);
-                }
-            }
+            let collected = self.scan(expected_digests)?;
             if collected.len() == expected_digests.len() {
                 return Ok(collected);
             }
-            if timeout_ms > 0 && start.elapsed() >= Duration::from_millis(timeout_ms) {
-                return Ok(collected);
+            match deadline {
+                None => {
+                    // Indefinite wait: block on the next filesystem event.
+                    // A watcher error event is infra noise, not a receipt;
+                    // either way the loop rescans.
+                    let _ = rx.recv().map_err(|e| {
+                        DriverError::Backend(format!("inbox watcher died: {e}"))
+                    })?;
+                }
+                Some(deadline) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return self.scan(expected_digests);
+                    }
+                    match rx.recv_timeout(remaining) {
+                        Ok(_) => {} // event (or watcher error) -> rescan
+                        Err(RecvTimeoutError::Timeout) => {
+                            // Terminal deadline: one final scan, then return
+                            // whatever arrived.
+                            return self.scan(expected_digests);
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            return Err(DriverError::Backend(
+                                "inbox watcher died".to_string(),
+                            ));
+                        }
+                    }
+                }
             }
-            std::thread::sleep(interval);
         }
+    }
+
+    /// One scan of the inbox for the expected digests. A present-but-
+    /// unparseable receipt is a typed error naming the file — never silently
+    /// skipped.
+    fn scan(&self, expected_digests: &[String]) -> Result<Vec<ReceiptFile>, DriverError> {
+        let mut collected: Vec<ReceiptFile> = Vec::new();
+        for digest in expected_digests {
+            let path = self.path_for(digest);
+            if path.exists() {
+                collected.push(self.read_receipt(&path, digest)?);
+            }
+        }
+        Ok(collected)
     }
 
     /// Read and validate one receipt file. The embedded `envelope_digest`
@@ -250,7 +311,7 @@ mod tests {
         )
         .unwrap();
         let got = ib
-            .wait_for_receipts(&[digest.to_string()], 10, 5_000)
+            .wait_for_receipts(&[digest.to_string()], 5_000)
             .unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].envelope_digest, digest);
@@ -264,7 +325,7 @@ mod tests {
         let d = tmpdir("timeout");
         let ib = Inbox::new(&d.join("inbox")).unwrap();
         let got = ib
-            .wait_for_receipts(&["sha256:never".to_string()], 10, 120)
+            .wait_for_receipts(&["sha256:never".to_string()], 120)
             .unwrap();
         assert!(got.is_empty());
         let _ = std::fs::remove_dir_all(&d);
@@ -277,7 +338,7 @@ mod tests {
         let digest = "sha256:bad1";
         std::fs::write(ib.path_for(digest), b"{not json").unwrap();
         let err = ib
-            .wait_for_receipts(&[digest.to_string()], 10, 5_000)
+            .wait_for_receipts(&[digest.to_string()], 5_000)
             .unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("receipt") && msg.contains(".receipt.json"), "{msg}");
@@ -299,9 +360,51 @@ mod tests {
         )
         .unwrap();
         let err = ib
-            .wait_for_receipts(&[digest.to_string()], 10, 5_000)
+            .wait_for_receipts(&[digest.to_string()], 5_000)
             .unwrap_err();
         assert!(format!("{err}").contains("linkage"), "{err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn inbox_collects_receipt_arriving_after_wait_starts() {
+        // The wait path is event-driven (inotify via `notify`), not polled:
+        // there is no `thread::sleep` anywhere in `wait_for_receipts` — a
+        // receipt published after the wait begins wakes the waiter through
+        // the filesystem event channel. (Asserted by code inspection; the
+        // wait below returns on the event, not on a timer tick.)
+        let d = tmpdir("evented");
+        let inbox_dir = d.join("inbox");
+        let ib = Inbox::new(&inbox_dir).unwrap();
+        let digest = "sha256:evented1".to_string();
+        let target = ib.path_for(&digest);
+
+        // Publisher: arrive 300ms after the wait starts, via atomic rename —
+        // the same tmp+rename protocol the dead drop requires.
+        let pub_digest = digest.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let body = serde_json::json!({
+                "envelope_digest": pub_digest,
+                "verdict": "pass",
+            });
+            let tmp = target.with_extension("tmp");
+            std::fs::write(&tmp, serde_json::to_vec(&body).unwrap()).unwrap();
+            std::fs::rename(&tmp, &target).unwrap();
+        });
+
+        let start = Instant::now();
+        let got = ib.wait_for_receipts(std::slice::from_ref(&digest), 10_000).unwrap();
+        let elapsed = start.elapsed();
+        handle.join().unwrap();
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].envelope_digest, digest);
+        // Returned on the event, far short of the deadline.
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "wait did not return promptly: {elapsed:?}"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 }
