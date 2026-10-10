@@ -47,7 +47,8 @@ use fabric_records::events::{EventPayload, FabricEvent};
 use fabric_records::store::digest_bytes;
 use fabric_spec::render::{render_prompt, RenderedPrompt, SharedContracts};
 use fabric_types::{
-    AcceptancePredicate, EndpointId, FabricError, Scope, TaskClass, TaskContract, TaskId, Verdict,
+    AcceptancePredicate, BackoffKind, EndpointId, FabricError, RetryPolicy, Scope, TaskClass,
+    TaskContract, TaskId, Verdict,
 };
 use fabric_verify::exec::{execute, ExecConfig, ExecOutcome};
 use fabric_verify::predicates::{
@@ -57,7 +58,7 @@ use fabric_verify::registry::{VerifierCapability, VerifierRegistration, Verifier
 use fabric_verify::verdict::{PredicateVerdict, VerdictBuilder};
 use fabric_workspace::workspace::{create_workspace, WorkspaceConfig};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -116,6 +117,10 @@ pub struct TaskOutcome {
     /// The `VerdictReceipt.receipt_digest` when `verified`; None when
     /// degraded.
     pub verdict_digest: Option<String>,
+    /// Set when the task's receipt was quarantined (malformed, linkage
+    /// mismatch, or over the size cap): the human-readable cause naming
+    /// the file. None otherwise.
+    pub receipt_error: Option<String>,
 }
 
 /// DRV-01: what `run()` returns.
@@ -158,6 +163,11 @@ struct LeafTask {
     acceptance_predicates: Vec<String>,
     #[serde(default)]
     verifier_ids: Vec<String>,
+    /// Optional bound on dispatch attempts for this task. Absent means the
+    /// contract default: exactly one attempt (`RetryPolicy::once`). The
+    /// driver never retries silently beyond this bound.
+    #[serde(default)]
+    max_attempts: Option<u32>,
 }
 
 // --- Driver -----------------------------------------------------------------
@@ -319,12 +329,21 @@ impl Driver {
         let mut workspace_paths: HashMap<TaskId, PathBuf> = HashMap::new();
         let mut verified_flags: HashMap<TaskId, bool> = HashMap::new();
         let mut verdict_digests: HashMap<TaskId, String> = HashMap::new();
+        let mut receipt_errors: HashMap<TaskId, String> = HashMap::new();
+        // FIX-3: tasks whose retry policy is exhausted. They keep their
+        // terminal fail gate but are never redispatched and never appear
+        // in a ready set again.
+        let mut retired: HashSet<TaskId> = HashSet::new();
         let mut waves_run: u32 = 0;
         let verification_degraded = self.verifiers.is_none();
 
         let outcome = loop {
-            // Terminal: every task has a gate verdict.
-            if task_order.iter().all(|id| gates.contains_key(id)) {
+            // Terminal: every task reached a terminal gate verdict (pass,
+            // or fail with no retries left).
+            if task_order
+                .iter()
+                .all(|id| gate_terminal(&gates, &contracts, &attempts, id))
+            {
                 break WaveOutcome::Complete;
             }
             // Terminal: wave budget spent.
@@ -332,7 +351,10 @@ impl Driver {
                 break WaveOutcome::BudgetExhausted;
             }
 
-            let ready = ready_tasks(&graph, &gates);
+            let ready: Vec<TaskId> = ready_tasks(&graph, &gates)
+                .into_iter()
+                .filter(|id| !retired.contains(id))
+                .collect();
             for id in &task_order {
                 if !gates.contains_key(id) {
                     *waves_waited.entry(id.clone()).or_insert(0) += 1;
@@ -353,17 +375,24 @@ impl Driver {
             let mut expected: Vec<String> = Vec::new();
             let mut digest_to_task: HashMap<String, TaskId> = HashMap::new();
             for task_id in &ready {
+                let contract = contracts.get(task_id).cloned().ok_or_else(|| {
+                    DriverError::Graph(format!("no contract for {task_id}"))
+                })?;
                 let attempt = attempts.get(task_id).copied().unwrap_or(0) + 1;
+                // FIX-3: honor the contract's retry policy. Attempts beyond
+                // max_attempts are terminal: no new workspace, no envelope,
+                // no redispatch. The gate goes fail and the task retires.
+                if !attempt_allowed(&contract, attempt) {
+                    gates.insert(task_id.clone(), Verdict::Fail);
+                    retired.insert(task_id.clone());
+                    continue;
+                }
                 attempts.insert(task_id.clone(), attempt);
 
                 let ws = create_workspace(&ws_config, &base_commit, task_id, attempt)
                     .map_err(|e| DriverError::Workspace(format!("{task_id}: {e:?}")))?;
                 workspace_paths.insert(task_id.clone(), ws.path.clone());
 
-                let contract = contracts
-                    .get(task_id)
-                    .cloned()
-                    .ok_or_else(|| DriverError::Graph(format!("no contract for {task_id}")))?;
                 // Render the T019 compartmented worker prompt. The driver holds
                 // no requirement corpus, so requirements are empty by
                 // construction — the prompt carries the contract, the
@@ -411,9 +440,29 @@ impl Driver {
             persist_events(&run_dir, &log)?;
 
             // Wait for receipts (event-driven; no polling).
-            let receipts = inbox.wait_for_receipts(&expected, cfg.wave_timeout_ms)?;
-            if receipts.len() < expected.len() {
+            let (receipts, problems) = inbox.wait_for_receipts(&expected, cfg.wave_timeout_ms)?;
+            if receipts.len() + problems.len() < expected.len() {
                 break WaveOutcome::WaveTimeout;
+            }
+
+            // FIX-3: quarantine. A malformed receipt (corrupt JSON, linkage
+            // mismatch, over the size cap) fails its task — recorded in the
+            // report — instead of aborting the run. One buggy worker cannot
+            // DoS the run. The task may still be retried within its retry
+            // policy; a later good receipt clears the quarantine record.
+            for problem in &problems {
+                let task_id = digest_to_task
+                    .get(&problem.envelope_digest)
+                    .cloned()
+                    .ok_or_else(|| {
+                        DriverError::Backend(format!(
+                            "receipt {} names unknown envelope digest {}",
+                            problem.path.display(),
+                            problem.envelope_digest
+                        ))
+                    })?;
+                gates.insert(task_id.clone(), Verdict::Fail);
+                receipt_errors.insert(task_id, problem.error.clone());
             }
 
             // Gate each receipt. Degraded mode: shape + linkage only, the
@@ -481,6 +530,7 @@ impl Driver {
                     .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
                 );
                 receipt_digests.insert(task_id.clone(), receipt.file_digest.clone());
+                receipt_errors.remove(&task_id);
                 verified_flags.insert(task_id.clone(), verified);
                 if let Some(d) = verdict_digest {
                     verdict_digests.insert(task_id.clone(), d);
@@ -506,6 +556,7 @@ impl Driver {
                     receipt_digest: receipt_digests.get(id).cloned(),
                     verified: verified_flags.get(id).copied().unwrap_or(false),
                     verdict_digest: verdict_digests.get(id).cloned(),
+                    receipt_error: receipt_errors.get(id).cloned(),
                 }
             })
             .collect();
@@ -576,6 +627,18 @@ fn load_manifest(
             .map_err(|e| DriverError::Manifest(format!("{id}: bad acceptance predicate: {e:?}")))?;
         // The manifest carries no task class; class is a contract-required
         // field, so the driver defaults to Implement and says so.
+        //
+        // Retry policy: honored by the dispatch loop (FIX-3). Absent in the
+        // manifest means exactly one attempt. Backoff is accepted by the
+        // type but not implemented by the driver: waves are event-driven
+        // and the driver never sleeps between attempts (no-timers
+        // doctrine), so attempts are separated by waves, not delays.
+        let retry = match leaf.max_attempts {
+            None => RetryPolicy::once(),
+            Some(n) => RetryPolicy::new(n, BackoffKind::None, 0, n.saturating_sub(1)).map_err(|e| {
+                DriverError::Manifest(format!("{id}: bad max_attempts: {e:?}"))
+            })?,
+        };
         let contract = TaskContract::builder(id.clone(), TaskClass::Implement, &leaf.objective)
             .spec_revision(if leaf.versioned_spec_reference.trim().is_empty() {
                 "unspecified"
@@ -592,6 +655,7 @@ fn load_manifest(
             )
             .acceptance(acceptance)
             .verifiers(leaf.verifier_ids.clone())
+            .retry(retry)
             .build()
             .map_err(|e| DriverError::Manifest(format!("{id}: incomplete contract: {e:?}")))?;
 
@@ -978,6 +1042,43 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// FIX-3: retry bound. Attempt numbers are 1-based; the contract's
+/// `retry.max_attempts` is the last attempt the driver will dispatch.
+/// The builder default is exactly one attempt (`RetryPolicy::once()`); the
+/// manifest may raise it via `max_attempts`. The `.max(1)` is defensive:
+/// a zero bound would silently refuse the first attempt, which is never
+/// the operator's intent — fail the gate instead of dispatching nothing.
+fn attempt_allowed(contract: &TaskContract, attempt: u32) -> bool {
+    attempt <= contract.retry.max_attempts.max(1)
+}
+
+/// FIX-3: a task's gate is terminal for the run when it passed, or when it
+/// failed and no attempts remain under its retry policy. A fail with
+/// attempts remaining is NOT terminal — the run continues so the retry can
+/// be dispatched. (Without this, a lone failed task would end the run
+/// before its policy-allowed retry.) Stateless: derived from attempts used
+/// vs the contract's `max_attempts`, so it holds even when `max_waves` (or
+/// anything else) prevents a later dispatch wave from running.
+fn gate_terminal(
+    gates: &GateVerdicts,
+    contracts: &HashMap<TaskId, TaskContract>,
+    attempts: &HashMap<TaskId, u32>,
+    id: &TaskId,
+) -> bool {
+    match gates.get(id) {
+        Some(v) if v.is_pass() => true,
+        Some(_) => {
+            let used = attempts.get(id).copied().unwrap_or(0);
+            let max = contracts
+                .get(id)
+                .map(|c| c.retry.max_attempts.max(1))
+                .unwrap_or(1);
+            used >= max
+        }
+        None => false,
+    }
+}
+
 /// Machine-readable reason for a Stalled outcome: which tasks are un-gated
 /// and which unpassed prerequisites hold each one back.
 fn stall_reason(graph: &TaskGraph, gates: &GateVerdicts, order: &[TaskId]) -> String {
@@ -1305,8 +1406,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// Seeder that answers every envelope with a fail-claim receipt. In
+    /// degraded mode the gate follows the claim, so the task fails every
+    /// attempt — the retry-policy bound is what stops redispatch.
+    fn spawn_fail_seeder(run_dir: PathBuf) -> std::thread::JoinHandle<()> {
+        spawn_raw_seeder(run_dir, |digest| {
+            serde_json::to_vec(&serde_json::json!({
+                "envelope_digest": digest,
+                "verdict": "fail",
+            }))
+            .unwrap()
+        })
+    }
+
+    /// Seeder that answers every envelope with corrupt (non-JSON) bytes.
+    fn spawn_corrupt_seeder(run_dir: PathBuf) -> std::thread::JoinHandle<()> {
+        spawn_raw_seeder(run_dir, |_digest| b"{{{ not json".to_vec())
+    }
+
+    /// Seeder that answers every envelope with an over-the-cap receipt.
+    fn spawn_oversize_seeder(run_dir: PathBuf) -> std::thread::JoinHandle<()> {
+        spawn_raw_seeder(run_dir, |_digest| vec![b'x'; 9 * 1024 * 1024])
+    }
+
+    fn spawn_raw_seeder(
+        run_dir: PathBuf,
+        body: fn(&str) -> Vec<u8>,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                let outbox = run_dir.join("outbox");
+                if outbox.is_dir() {
+                    for entry in std::fs::read_dir(&outbox).unwrap() {
+                        let entry = entry.unwrap();
+                        let name = entry.file_name().to_str().unwrap().to_string();
+                        if !name.ends_with(".json") || name.ends_with(".receipt.json") {
+                            continue;
+                        }
+                        let digest = name.trim_end_matches(".json").to_string();
+                        let rp = run_dir.join("inbox").join(format!("{digest}.receipt.json"));
+                        if !rp.exists() {
+                            write_atomic_test(&rp, &body(&digest));
+                        }
+                    }
+                }
+                if std::time::Instant::now() > deadline || run_dir.join("DONE").exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        })
+    }
+
     /// Atomic file write for test seeders: a worker must never leave a
-    /// half-written receipt where the driver's inbox poll can see it.
+    /// half-written receipt where the driver's inbox watcher can see it.
     fn write_atomic_test(path: &std::path::Path, bytes: &[u8]) {
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, bytes).unwrap();
@@ -1498,6 +1652,125 @@ mod tests {
         assert_eq!(t.gate, "fail", "{t:?}");
         assert!(t.verified, "{t:?}");
         assert!(t.verdict_digest.is_some(), "{t:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn manifest_single_task_retry(dir: &std::path::Path, max_attempts: u32) -> PathBuf {
+        let m = serde_json::json!({ "leaf_tasks": [
+            {
+                "stable_id": "T001",
+                "objective": "objective of T001",
+                "versioned_spec_reference": "rev-1",
+                "allowed_scope": ["x"], "inputs": ["i"], "outputs": ["o"],
+                "dependencies": [], "acceptance_predicates": ["p1"], "verifier_ids": ["v"],
+                "max_attempts": max_attempts,
+            },
+        ]});
+        let p = dir.join("manifest.json");
+        std::fs::write(&p, serde_json::to_vec(&m).unwrap()).unwrap();
+        p
+    }
+
+    #[test]
+    fn attempt_allowed_honors_max_attempts() {
+        let contract_with = |n: u32| {
+            TaskContract::builder(TaskId::new("T1").unwrap(), TaskClass::Implement, "o")
+                .spec_revision("r")
+                .inputs(vec!["i".to_string()])
+                .outputs(vec!["o".to_string()])
+                .scope(Scope::new(vec!["x".to_string()]).unwrap())
+                .acceptance(vec![AcceptancePredicate::new("p", "p", true).unwrap()])
+                .verifiers(vec!["v".to_string()])
+                .retry(RetryPolicy::new(n, BackoffKind::None, 0, 0).unwrap())
+                .build()
+                .unwrap()
+        };
+        let c2 = contract_with(2);
+        assert!(attempt_allowed(&c2, 1));
+        assert!(attempt_allowed(&c2, 2));
+        assert!(!attempt_allowed(&c2, 3));
+        // Builder default is once(): a single attempt, then stop.
+        let c1 = TaskContract::builder(TaskId::new("T1").unwrap(), TaskClass::Implement, "o")
+            .spec_revision("r")
+            .inputs(vec!["i".to_string()])
+            .outputs(vec!["o".to_string()])
+            .scope(Scope::new(vec!["x".to_string()]).unwrap())
+            .acceptance(vec![AcceptancePredicate::new("p", "p", true).unwrap()])
+            .verifiers(vec!["v".to_string()])
+            .build()
+            .unwrap();
+        assert!(attempt_allowed(&c1, 1));
+        assert!(!attempt_allowed(&c1, 2));
+    }
+
+    #[test]
+    fn retry_policy_bounds_redispatch_attempts() {
+        // A deterministically-failing task with max_attempts=2 gets exactly
+        // 2 attempts (2 workspaces), then a terminal fail gate — not
+        // max_waves attempts.
+        let d = tmpdir("retrybound");
+        let manifest = manifest_single_task_retry(&d, 2);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.max_waves = 5;
+        let driver = Driver::new(cfg).unwrap();
+
+        let run_dir = d.join("run");
+        let seeder = spawn_fail_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        assert!(t.receipt_error.is_none(), "{t:?}");
+        // Exactly 2 attempts: no third workspace, no third envelope.
+        let ws_count = std::fs::read_dir(run_dir.join("workspaces"))
+            .unwrap()
+            .count();
+        assert_eq!(ws_count, 2, "expected exactly 2 workspaces");
+        assert_eq!(report.outcome, WaveOutcome::Complete);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn malformed_receipt_quarantines_task_not_run() {
+        // One corrupt receipt fails its task with the cause recorded; the
+        // run itself completes with a report.
+        let d = tmpdir("quarantine");
+        let manifest = manifest_single_task_retry(&d, 1);
+        let driver = Driver::new(config_for(&d, &manifest)).unwrap();
+
+        let run_dir = d.join("run");
+        let seeder = spawn_corrupt_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        let err = t.receipt_error.as_deref().expect("quarantine cause recorded");
+        assert!(err.contains("fails to parse"), "{err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn oversize_receipt_quarantined_at_driver() {
+        // A 9 MiB receipt is rejected by the size cap and quarantined; the
+        // run completes and names the cause.
+        let d = tmpdir("bigreceipt");
+        let manifest = manifest_single_task_retry(&d, 1);
+        let driver = Driver::new(config_for(&d, &manifest)).unwrap();
+
+        let run_dir = d.join("run");
+        let seeder = spawn_oversize_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        let err = t.receipt_error.as_deref().expect("quarantine cause recorded");
+        assert!(err.contains("exceeds size cap"), "{err}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
