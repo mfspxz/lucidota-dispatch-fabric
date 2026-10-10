@@ -18,7 +18,7 @@
         }
       ],
       "interface_digest": "sha256:47ff251273082f5bfd0ef9770e4dbcc24b0782f7a6364b8ad6ad8bd2b7cb0f37",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:0a43a58f787669813d7ba5035d83b43a5fdae782d7d064595e10248f50838563",
       "source": "workspace:organelle/core"
     },
     {
@@ -34,7 +34,7 @@
         }
       ],
       "interface_digest": "sha256:2c3d2bde18c8b39c66461a2f30b50afafa44bdbc46b7944ef2a2c4f8434b733d",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:ca0a7d2053207a3b7b8b16cdc40c44902528d530dc69e9ba886e97cd84939c12",
       "source": "workspace:dispatch-fabric/crates/fabric-types"
     },
     {
@@ -55,7 +55,7 @@
         }
       ],
       "interface_digest": "sha256:371a45889a3842a10735d0d41e6dd2921d2fb5d47192e4eb12c05c84f7c00b83",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:58c36c6f394062ac613401a575a28e3b95873ccfa92dadf8ed8a8ae5d2a63578",
       "source": "workspace:dispatch-fabric/crates/fabric-spec"
     },
     {
@@ -76,7 +76,7 @@
         }
       ],
       "interface_digest": "sha256:2118a69b0a2c778f60cb57dcfbd2a3eda81fd7bebd3c52efafdff2de06352463",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:bfc65853b2e169be0ad77008542afd3228b15b1ee5c4e8b2e63fecda7659fc71",
       "source": "workspace:dispatch-fabric/crates/fabric-registry"
     },
     {
@@ -97,7 +97,7 @@
         }
       ],
       "interface_digest": "sha256:61acc723a1a809e64d33cb7092e0ecdc7669480af784eb67f3a01b8849b324e2",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:bac6f8f6dde57af61a71087e657b4c17cae3b70307b56fb628da1a7237e01f8d",
       "source": "workspace:dispatch-fabric/crates/fabric-adapters"
     },
     {
@@ -118,7 +118,7 @@
         }
       ],
       "interface_digest": "sha256:dc9a0f793063e5a5b5fedf9e0ab0106bb4536a84523c7f31fb5c18ef6134c3a7",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:c66255ed5cd8eb2f1670581321252a0207dc25dcf8b452f5434f7a02c685e2a3",
       "source": "workspace:dispatch-fabric/crates/fabric-quota"
     },
     {
@@ -139,7 +139,7 @@
         }
       ],
       "interface_digest": "sha256:4638e222c9838ed22dd345a406a7d73dce7d60d4a61228f4c9c4d81ad10c9092",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:6a998f72f2192b92b78207dbff531a8617b310c7d8f5a8ebb9886ec10e41557e",
       "source": "workspace:dispatch-fabric/crates/fabric-graph"
     },
     {
@@ -160,7 +160,7 @@
         }
       ],
       "interface_digest": "sha256:b41f39ca50d8cde96f6b391c3d3ed2c6547b076bef5228e8751056c2e1e9f713",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:fc414bece074cc99514ef174e5f0f140a8b6a49e2312bf45a2ce7d63a97934d1",
       "source": "workspace:dispatch-fabric/crates/fabric-dispatch"
     },
     {
@@ -181,7 +181,7 @@
         }
       ],
       "interface_digest": "sha256:364abe02cce46c4fd686ace2f51ca97e84fb013e1468247f1417ec3ed000e6bb",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:ebbb7a5dce404a61eb5e892042b7b5b6b63b26c0ed0bb4c453c03dfb6922ef41",
       "source": "workspace:dispatch-fabric/crates/fabric-workspace"
     },
     {
@@ -202,7 +202,7 @@
         }
       ],
       "interface_digest": "sha256:9cc165d6508fd301b8c327df056668df3387e8a2bfa952af3d0d3ee4fc5e2763",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:f82eaf9e98bf5fb486d37f61a0234b7e212f858b2195733c66cd4561b5937827",
       "source": "workspace:dispatch-fabric/crates/fabric-records"
     },
     {
@@ -223,7 +223,7 @@
         }
       ],
       "interface_digest": "sha256:7b9e15dbe511f0a12223660c01fde185380ded8c2c58a5e17b3e36c02db06d3f",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:253d4543e73f2a6492f43baab115bcad4ee9d50032c0365f33e1b0e0b43129f5",
       "source": "workspace:dispatch-fabric/crates/fabric-verify"
     },
     {
@@ -244,7 +244,7 @@
         }
       ],
       "interface_digest": "sha256:6eaeed8a502bb26cf8c86bbf09db717a7e2ec927beea5a57c3cc0ac7ee0b080d",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:1eedec1629e8cdb3f9bc9155063e10bc2f213ed6eb1405d00a4bbcb6f5633c84",
       "source": "workspace:dispatch-fabric/crates/fabric-organelles"
     },
     {
@@ -265,9 +265,9 @@
         }
       ],
       "interface_digest": "sha256:c9cce708d6256be4b504812e9c29a1765582bed0e82aa58052d903bce39c2056",
-      "artifact_digest": "pending:build-artifact",
+      "artifact_digest": "sha256:6be3a2c8cca105396d155407f423be6e520f648dd3af0957db0493c7393682a1",
       "source": "workspace:dispatch-fabric/crates/fabric-driver"
     }
   ],
-  "registry_digest": "sha256:f1115a5f3a4c18aa1773b9fe3719985e2550e75f36281d23ea6ab32c65744b2e"
+  "registry_digest": "sha256:bbaebcf416fa30ed845ece17378d9cf2d2da6640cb166f1a3931187037b58b8a"
 }
