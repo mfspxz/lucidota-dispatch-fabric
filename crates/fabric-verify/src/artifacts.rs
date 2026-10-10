@@ -17,6 +17,23 @@ use fabric_types::{ArtifactRef, FabricError, Result, TaskId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Production SHA-256 digester. Use this outside tests; the trait stays
+/// injectable so tests can use a deterministic non-crypto double.
+pub struct Sha256Digest;
+
+impl ContentDigest for Sha256Digest {
+    fn algorithm(&self) -> &'static str {
+        "sha256"
+    }
+
+    fn digest_hex(&self, bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(bytes);
+        format!("{:x}", h.finalize())
+    }
+}
+
 /// Injectable content digest. Object-safe so stores can own a boxed digester.
 pub trait ContentDigest: Send + Sync {
     /// Algorithm label used in `algo:hex` digest strings, e.g. `"sha256"`.
