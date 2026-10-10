@@ -4834,32 +4834,36 @@
   ],
   "integration_batches": {
     "batch-1": {
-      "range": [
+      "planned_range": [
         1,
         39
       ],
-      "size": 39
+      "actual": "T001-T039 (I1 PASS)",
+      "note": "as planned"
     },
     "batch-2": {
-      "range": [
+      "planned_range": [
         40,
         78
       ],
-      "size": 39
+      "actual": "T040-T078 (I2 PASS)",
+      "note": "as planned"
     },
     "batch-3": {
-      "range": [
+      "planned_range": [
         79,
         117
       ],
-      "size": 39
+      "actual": "T079-T100 (I3 PASS); T101-T117 not defined",
+      "note": "spec sections 3-4 missing; T101+ blocked, see RT1-003"
     },
     "batch-4": {
-      "range": [
+      "planned_range": [
         118,
         150
       ],
-      "size": 33
+      "actual": "none \u2014 not defined",
+      "note": "blocked on missing spec sections 3-4; do not invent"
     }
   },
   "risks": [
@@ -5029,9 +5033,39 @@
       "batch": "batch-1",
       "tasks": "T001-T039",
       "verdict": "PASS",
-      "tests_passed": 234,
-      "tests_failed": 0,
       "receipt": "evidence/integration/I1.json"
+    },
+    "I2": {
+      "batch": "batch-2",
+      "tasks": "T040-T078",
+      "verdict": "PASS",
+      "receipt": "evidence/integration/I2.json"
+    },
+    "I3": {
+      "batch": "batch-3 (partial)",
+      "tasks": "T079-T100",
+      "verdict": "PASS",
+      "receipt": "evidence/integration/I3.json"
+    },
+    "I4": {
+      "batch": "self-host",
+      "tasks": "fabric-organelles + fabric-driver",
+      "verdict": "PASS",
+      "receipt": "evidence/integration/I4.json"
+    },
+    "I5": {
+      "batch": "interop",
+      "tasks": "INT-01/INT-02 + DRV-04/DRV-05",
+      "verdict": "PASS",
+      "tests": "704 passed",
+      "receipt": "evidence/integration/I5.json"
+    },
+    "I6": {
+      "batch": "hardening",
+      "tasks": "DRV-06 + REG-02",
+      "verdict": "PASS",
+      "tests": "711 passed",
+      "receipt": "evidence/integration/I6.json"
     }
   }
 }
