@@ -22,4 +22,10 @@ pub struct DriverConfig {
     /// receipt. When absent, the driver checks receipt shape + digest
     /// linkage only (documented degradation).
     pub verifiers_path: Option<PathBuf>,
+    /// Explicit opt-in to degraded mode (no `verifiers_path`). Default
+    /// false: `Driver::new` refuses to construct a driver that would gate
+    /// tasks on unverified receipt claims unless the operator sets this to
+    /// true. Fail-closed — a forged `{"verdict": "pass"}` receipt must never
+    /// silently pass gates in production.
+    pub allow_degraded: bool,
 }

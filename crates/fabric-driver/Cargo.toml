@@ -11,6 +11,7 @@ fabric-dispatch = { path = "../fabric-dispatch" }
 fabric-workspace = { path = "../fabric-workspace" }
 fabric-records = { path = "../fabric-records" }
 fabric-verify = { path = "../fabric-verify" }
+fabric-spec = { path = "../fabric-spec" }
 fabric-organelles = { path = "../fabric-organelles" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
