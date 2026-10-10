@@ -76,6 +76,25 @@ pub struct Inbox {
     dir: PathBuf,
 }
 
+/// Maximum receipt file size: 8 MiB. Receipts are small JSON claim
+/// envelopes (typically single-digit KiB). Anything larger is a worker bug
+/// or a resource-exhaustion attempt: rejected with a typed error naming the
+/// file, handled by the caller's quarantine path. Never read unbounded
+/// into memory.
+const MAX_RECEIPT_BYTES: u64 = 8 * 1024 * 1024;
+
+/// A receipt file that exists but cannot be used: corrupt JSON, digest
+/// linkage mismatch, or over the size cap. Quarantined by the caller —
+/// it fails its task, never the run.
+#[derive(Debug, Clone)]
+pub struct ReceiptProblem {
+    /// Envelope digest from the filename (the claim being answered).
+    pub envelope_digest: String,
+    pub path: PathBuf,
+    /// Human-readable cause, naming the file.
+    pub error: String,
+}
+
 impl Inbox {
     /// Create (or open) the inbox directory.
     pub fn new(dir: &Path) -> Result<Self, DriverError> {
@@ -108,15 +127,30 @@ impl Inbox {
     /// file and renaming it into place (see `write_atomic`, and the seeder's
     /// tmp+rename). A rename appears as a single create event for the final
     /// `*.receipt.json` name, so a file we observe under an expected name is
-    /// complete — never a half-written stream. A receipt file that fails to
-    /// parse is a typed error naming the file, never silently skipped. A
-    /// receipt whose embedded `envelope_digest` disagrees with its filename
-    /// is a linkage error naming the file.
+    /// complete — never a half-written stream.
+    ///
+    /// A receipt file that fails to parse, disagrees with its filename
+    /// digest (linkage), or exceeds the size cap is a typed problem naming
+    /// the file — quarantined, never silently skipped, never fatal to the
+    /// run.
+    ///
+    /// Wait for receipts, driven by filesystem events — never by polling.
+    ///
+    /// Watches the inbox directory with the OS file-notification facility
+    /// (inotify on Linux via the `notify` crate) and rescans the expected
+    /// digests on every event, plus one initial scan on entry so receipts
+    /// that arrived before the watch started are not missed.
+    ///
+    /// Returns the usable receipts alongside the quarantined problems. A
+    /// malformed receipt (corrupt JSON, linkage mismatch, over the size
+    /// cap) counts as *answered* — it appears in `problems`, and the
+    /// caller fails that task rather than aborting the run. One buggy
+    /// worker cannot DoS the run.
     pub fn wait_for_receipts(
         &self,
         expected_digests: &[String],
         timeout_ms: u64,
-    ) -> Result<Vec<ReceiptFile>, DriverError> {
+    ) -> Result<(Vec<ReceiptFile>, Vec<ReceiptProblem>), DriverError> {
         // The watcher must exist before the first scan: an event that lands
         // between watch-start and scan is queued in the channel and triggers
         // a rescan, so no wakeup is ever missed.
@@ -138,9 +172,9 @@ impl Inbox {
         let deadline = (timeout_ms > 0).then(|| start + Duration::from_millis(timeout_ms));
 
         loop {
-            let collected = self.scan(expected_digests)?;
-            if collected.len() == expected_digests.len() {
-                return Ok(collected);
+            let (collected, problems) = self.scan(expected_digests);
+            if collected.len() + problems.len() == expected_digests.len() {
+                return Ok((collected, problems));
             }
             match deadline {
                 None => {
@@ -154,14 +188,14 @@ impl Inbox {
                 Some(deadline) => {
                     let remaining = deadline.saturating_duration_since(Instant::now());
                     if remaining.is_zero() {
-                        return self.scan(expected_digests);
+                        return Ok(self.scan(expected_digests));
                     }
                     match rx.recv_timeout(remaining) {
                         Ok(_) => {} // event (or watcher error) -> rescan
                         Err(RecvTimeoutError::Timeout) => {
                             // Terminal deadline: one final scan, then return
                             // whatever arrived.
-                            return self.scan(expected_digests);
+                            return Ok(self.scan(expected_digests));
                         }
                         Err(RecvTimeoutError::Disconnected) => {
                             return Err(DriverError::Backend(
@@ -175,25 +209,58 @@ impl Inbox {
     }
 
     /// One scan of the inbox for the expected digests. A present-but-
-    /// unparseable receipt is a typed error naming the file — never silently
-    /// skipped.
-    fn scan(&self, expected_digests: &[String]) -> Result<Vec<ReceiptFile>, DriverError> {
+    /// unusable receipt becomes a `ReceiptProblem` — never silently skipped,
+    /// never fatal to the scan.
+    fn scan(&self, expected_digests: &[String]) -> (Vec<ReceiptFile>, Vec<ReceiptProblem>) {
         let mut collected: Vec<ReceiptFile> = Vec::new();
+        let mut problems: Vec<ReceiptProblem> = Vec::new();
         for digest in expected_digests {
             let path = self.path_for(digest);
             if path.exists() {
-                collected.push(self.read_receipt(&path, digest)?);
+                match self.read_receipt(&path, digest) {
+                    Ok(r) => collected.push(r),
+                    Err(e) => problems.push(ReceiptProblem {
+                        envelope_digest: digest.clone(),
+                        path: path.clone(),
+                        error: e.to_string(),
+                    }),
+                }
             }
         }
-        Ok(collected)
+        (collected, problems)
     }
 
     /// Read and validate one receipt file. The embedded `envelope_digest`
-    /// must match the filename's digest (linkage check).
+    /// must match the filename's digest (linkage check). Files over
+    /// `MAX_RECEIPT_BYTES` are rejected before reading.
     fn read_receipt(&self, path: &Path, expected_digest: &str) -> Result<ReceiptFile, DriverError> {
+        let len = path
+            .metadata()
+            .map_err(|e| {
+                DriverError::Backend(format!("cannot stat receipt {}: {e}", path.display()))
+            })?
+            .len();
+        if len > MAX_RECEIPT_BYTES {
+            return Err(DriverError::Backend(format!(
+                "receipt {} exceeds size cap ({} bytes > {} bytes)",
+                path.display(),
+                len,
+                MAX_RECEIPT_BYTES
+            )));
+        }
         let bytes = std::fs::read(path).map_err(|e| {
             DriverError::Backend(format!("cannot read receipt {}: {e}", path.display()))
         })?;
+        // Belt-and-braces: the file may have grown between the stat above
+        // and the read. Never hold more than the cap in memory.
+        if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+            return Err(DriverError::Backend(format!(
+                "receipt {} grew past the size cap while reading ({} bytes > {} bytes)",
+                path.display(),
+                bytes.len(),
+                MAX_RECEIPT_BYTES
+            )));
+        }
         let body: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
             DriverError::Backend(format!(
                 "receipt {} fails to parse as JSON: {e}",
@@ -310,10 +377,11 @@ mod tests {
             serde_json::to_vec(&body).unwrap(),
         )
         .unwrap();
-        let got = ib
+        let (got, problems) = ib
             .wait_for_receipts(&[digest.to_string()], 5_000)
             .unwrap();
         assert_eq!(got.len(), 1);
+        assert!(problems.is_empty());
         assert_eq!(got[0].envelope_digest, digest);
         assert_eq!(got[0].body["verdict"], "pass");
         assert!(got[0].file_digest.starts_with("sha256:"));
@@ -324,29 +392,36 @@ mod tests {
     fn inbox_timeout_returns_what_arrived() {
         let d = tmpdir("timeout");
         let ib = Inbox::new(&d.join("inbox")).unwrap();
-        let got = ib
+        let (got, problems) = ib
             .wait_for_receipts(&["sha256:never".to_string()], 120)
             .unwrap();
         assert!(got.is_empty());
+        assert!(problems.is_empty());
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
-    fn unparseable_receipt_is_typed_error_naming_file() {
+    fn unparseable_receipt_is_quarantined_not_fatal() {
+        // FIX-3: a malformed receipt no longer aborts the wait with Err.
+        // It is quarantined as a ReceiptProblem naming the file; the run
+        // continues and the caller fails that task.
         let d = tmpdir("poison");
         let ib = Inbox::new(&d.join("inbox")).unwrap();
         let digest = "sha256:bad1";
         std::fs::write(ib.path_for(digest), b"{not json").unwrap();
-        let err = ib
+        let (got, problems) = ib
             .wait_for_receipts(&[digest.to_string()], 5_000)
-            .unwrap_err();
-        let msg = format!("{err}");
+            .unwrap();
+        assert!(got.is_empty());
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].envelope_digest, digest);
+        let msg = &problems[0].error;
         assert!(msg.contains("receipt") && msg.contains(".receipt.json"), "{msg}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
-    fn linkage_mismatch_is_rejected() {
+    fn linkage_mismatch_is_quarantined() {
         let d = tmpdir("linkage");
         let ib = Inbox::new(&d.join("inbox")).unwrap();
         let digest = "sha256:real1";
@@ -359,10 +434,37 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let err = ib
+        let (got, problems) = ib
             .wait_for_receipts(&[digest.to_string()], 5_000)
-            .unwrap_err();
-        assert!(format!("{err}").contains("linkage"), "{err}");
+            .unwrap();
+        assert!(got.is_empty());
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].error.contains("linkage"), "{}", problems[0].error);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn oversize_receipt_rejected_before_read() {
+        // FIX-3: receipts are size-capped. A file one byte over the cap is
+        // rejected with a typed error naming the file — never read
+        // unbounded into memory.
+        let d = tmpdir("oversize");
+        let ib = Inbox::new(&d.join("inbox")).unwrap();
+        let digest = "sha256:big1";
+        let path = ib.path_for(digest);
+        let big = vec![b'x'; (MAX_RECEIPT_BYTES + 1) as usize];
+        std::fs::write(&path, &big).unwrap();
+        let err = ib.read_receipt(&path, digest).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("exceeds size cap"), "{msg}");
+        assert!(msg.contains(".receipt.json"), "{msg}");
+        // And through the quarantine path:
+        let (got, problems) = ib
+            .wait_for_receipts(&[digest.to_string()], 5_000)
+            .unwrap();
+        assert!(got.is_empty());
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].error.contains("exceeds size cap"));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -394,11 +496,12 @@ mod tests {
         });
 
         let start = Instant::now();
-        let got = ib.wait_for_receipts(std::slice::from_ref(&digest), 10_000).unwrap();
+        let (got, problems) = ib.wait_for_receipts(std::slice::from_ref(&digest), 10_000).unwrap();
         let elapsed = start.elapsed();
         handle.join().unwrap();
 
         assert_eq!(got.len(), 1);
+        assert!(problems.is_empty());
         assert_eq!(got[0].envelope_digest, digest);
         // Returned on the event, far short of the deadline.
         assert!(
