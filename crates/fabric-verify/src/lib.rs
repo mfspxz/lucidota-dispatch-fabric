@@ -10,6 +10,7 @@
 //! Workers implement bodies and own the remaining modules outright.
 
 pub mod artifacts;
+pub mod attest;
 pub mod bundle;
 pub mod cache;
 pub mod coverage;
@@ -19,6 +20,7 @@ pub mod linkage;
 pub mod normalize;
 pub mod predicates;
 pub mod redact;
+pub mod slsa;
 pub mod registry;
 pub mod review;
 pub mod verdict;

@@ -18,4 +18,10 @@ pub struct DriverConfig {
     /// Maximum time to wait for a wave's receipts, milliseconds.
     /// 0 means wait indefinitely (the runner is responsible for liveness).
     pub wave_timeout_ms: u64,
+    /// Optional path to a JSON file with `Vec<VerifierRegistration>`
+    /// (fabric-verify). When present, the driver runs registered verifiers
+    /// against each receipt's workspace and gates on the VERDICT, not the
+    /// receipt. When absent, the driver checks receipt shape + digest
+    /// linkage only (documented degradation).
+    pub verifiers_path: Option<PathBuf>,
 }
