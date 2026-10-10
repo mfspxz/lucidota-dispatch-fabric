@@ -1,0 +1,273 @@
+{
+  "records": [
+    {
+      "name": "organelle-core",
+      "version": "0.1.0",
+      "layer": "Global",
+      "mutation_class": "ReadOnly",
+      "inputs": [
+        {
+          "layer": "Global",
+          "name": "TypedValue"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Global",
+          "name": "TypedValue"
+        }
+      ],
+      "interface_digest": "sha256:47ff251273082f5bfd0ef9770e4dbcc24b0782f7a6364b8ad6ad8bd2b7cb0f37",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:organelle/core"
+    },
+    {
+      "name": "fabric-types",
+      "version": "0.1.0",
+      "layer": "Global",
+      "mutation_class": "ReadOnly",
+      "inputs": [],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "TypeDefs"
+        }
+      ],
+      "interface_digest": "sha256:2c3d2bde18c8b39c66461a2f30b50afafa44bdbc46b7944ef2a2c4f8434b733d",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-types"
+    },
+    {
+      "name": "fabric-spec",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "ReadOnly",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "SpecText"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "Manifest"
+        }
+      ],
+      "interface_digest": "sha256:371a45889a3842a10735d0d41e6dd2921d2fb5d47192e4eb12c05c84f7c00b83",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-spec"
+    },
+    {
+      "name": "fabric-registry",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "Write",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "EndpointConfig"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "EndpointHandle"
+        }
+      ],
+      "interface_digest": "sha256:2118a69b0a2c778f60cb57dcfbd2a3eda81fd7bebd3c52efafdff2de06352463",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-registry"
+    },
+    {
+      "name": "fabric-adapters",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "ExternalEffect",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "InferenceRequest"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "InferenceResponse"
+        }
+      ],
+      "interface_digest": "sha256:61acc723a1a809e64d33cb7092e0ecdc7669480af784eb67f3a01b8849b324e2",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-adapters"
+    },
+    {
+      "name": "fabric-quota",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "Write",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "UsageReport"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "AdmissionDecision"
+        }
+      ],
+      "interface_digest": "sha256:dc9a0f793063e5a5b5fedf9e0ab0106bb4536a84523c7f31fb5c18ef6134c3a7",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-quota"
+    },
+    {
+      "name": "fabric-graph",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "ReadOnly",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "TaskList"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "TaskGraph"
+        }
+      ],
+      "interface_digest": "sha256:4638e222c9838ed22dd345a406a7d73dce7d60d4a61228f4c9c4d81ad10c9092",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-graph"
+    },
+    {
+      "name": "fabric-dispatch",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "Write",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "DispatchCandidate"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "DispatchEnvelope"
+        }
+      ],
+      "interface_digest": "sha256:b41f39ca50d8cde96f6b391c3d3ed2c6547b076bef5228e8751056c2e1e9f713",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-dispatch"
+    },
+    {
+      "name": "fabric-workspace",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "ExternalEffect",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "TaskAttempt"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "Workspace"
+        }
+      ],
+      "interface_digest": "sha256:364abe02cce46c4fd686ace2f51ca97e84fb013e1468247f1417ec3ed000e6bb",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-workspace"
+    },
+    {
+      "name": "fabric-records",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "Write",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "Event"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "Receipt"
+        }
+      ],
+      "interface_digest": "sha256:9cc165d6508fd301b8c327df056668df3387e8a2bfa952af3d0d3ee4fc5e2763",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-records"
+    },
+    {
+      "name": "fabric-verify",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "ExternalEffect",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "Artifact"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "Verdict"
+        }
+      ],
+      "interface_digest": "sha256:7b9e15dbe511f0a12223660c01fde185380ded8c2c58a5e17b3e36c02db06d3f",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-verify"
+    },
+    {
+      "name": "fabric-organelles",
+      "version": "0.1.0",
+      "layer": "Global",
+      "mutation_class": "ReadOnly",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "OrganelleQuery"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "OrganelleRecord"
+        }
+      ],
+      "interface_digest": "sha256:6eaeed8a502bb26cf8c86bbf09db717a7e2ec927beea5a57c3cc0ac7ee0b080d",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-organelles"
+    },
+    {
+      "name": "fabric-driver",
+      "version": "0.1.0",
+      "layer": "Domain",
+      "mutation_class": "ExternalEffect",
+      "inputs": [
+        {
+          "layer": "Domain",
+          "name": "WorkOrder"
+        }
+      ],
+      "outputs": [
+        {
+          "layer": "Domain",
+          "name": "DriverReport"
+        }
+      ],
+      "interface_digest": "sha256:c9cce708d6256be4b504812e9c29a1765582bed0e82aa58052d903bce39c2056",
+      "artifact_digest": "pending:build-artifact",
+      "source": "workspace:dispatch-fabric/crates/fabric-driver"
+    }
+  ],
+  "registry_digest": "sha256:f1115a5f3a4c18aa1773b9fe3719985e2550e75f36281d23ea6ab32c65744b2e"
+}

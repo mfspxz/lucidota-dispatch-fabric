@@ -1,0 +1,1 @@
+{"envelope_digest": "sha256:199efa78a4f00307b9a4cddd585817329a02e54c84c652b82bbbe06df3bcee74", "task_id": "DOG-C", "attempt": 1, "verdict": "pass", "artifacts": [{"path": "three.txt", "content": "three"}], "worker": "dogfood-operator"}

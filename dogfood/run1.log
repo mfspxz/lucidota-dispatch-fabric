@@ -1,0 +1,26 @@
+{
+  "outcome": "Complete",
+  "waves_run": 3,
+  "tasks": [
+    {
+      "task_id": "DOG-A",
+      "waves_waited": 1,
+      "gate": "pass",
+      "receipt_digest": "sha256:1150c22ef42388a740f2c60118d03327a5a4fc46721acdb182840152a45a6a04"
+    },
+    {
+      "task_id": "DOG-B",
+      "waves_waited": 2,
+      "gate": "pass",
+      "receipt_digest": "sha256:4cae480903887c60013f75648b0aae8b7c46ea17a398e405e5f7da5e363b7d35"
+    },
+    {
+      "task_id": "DOG-C",
+      "waves_waited": 3,
+      "gate": "pass",
+      "receipt_digest": "sha256:d711875037da54694a11c940639f789cb5ae44a7172116e9af53595226d5591e"
+    }
+  ],
+  "run_dir": "dogfood/run1"
+}
+DRIVER EXIT: 0

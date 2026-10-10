@@ -504,9 +504,18 @@ fn ensure_workspace_repo(
         git(&repo, &["config", "commit.gpgsign", "false"])?;
         git(&repo, &["commit", "-q", "--allow-empty", "-m", "driver base"])?;
     }
+    // Canonicalize to absolute paths: `git -C <repo> worktree add <path>`
+    // resolves a relative <path> against the repo dir, not the process cwd.
+    // A relative worktree_root would nest worktrees inside the repo itself.
+    let repo = repo.canonicalize().map_err(|e| {
+        DriverError::Workspace(format!("cannot canonicalize repo dir: {e}"))
+    })?;
+    let worktree_root = worktree_root.canonicalize().map_err(|e| {
+        DriverError::Workspace(format!("cannot canonicalize worktree root: {e}"))
+    })?;
     Ok(WorkspaceConfig {
         repo_path: repo,
-        worktree_root: worktree_root.to_path_buf(),
+        worktree_root,
         branch_prefix: "driver".to_string(),
     })
 }
