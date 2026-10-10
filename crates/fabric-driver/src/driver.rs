@@ -45,6 +45,7 @@ use fabric_graph::{DepEdge, EdgeKind, TaskGraph, TaskNode};
 use fabric_records::chain::{EventLog, EventRecord};
 use fabric_records::events::{EventPayload, FabricEvent};
 use fabric_records::store::digest_bytes;
+use fabric_spec::render::{render_prompt, RenderedPrompt, SharedContracts};
 use fabric_types::{
     AcceptancePredicate, EndpointId, FabricError, Scope, TaskClass, TaskContract, TaskId, Verdict,
 };
@@ -161,6 +162,40 @@ struct LeafTask {
 
 // --- Driver -----------------------------------------------------------------
 
+/// Render the T019 compartmented worker prompt for one task contract.
+///
+/// * `contract` — the task contract (the worker's whole world).
+/// * `output_schema` — the JSON schema the worker's output must satisfy.
+/// * `shared` — shared-contract identifiers for the run (fabric version and
+///   the manifest/policy digest).
+///
+/// The driver holds no requirement corpus, so requirements are empty by
+/// construction. Deterministic: same inputs → byte-identical text, and
+/// `RenderedPrompt.digest` is `sha256:` over the exact rendered bytes.
+fn render_worker_prompt(
+    contract: &TaskContract,
+    output_schema: &serde_json::Value,
+    shared: &SharedContracts,
+) -> Result<RenderedPrompt, String> {
+    render_prompt(contract, &[], shared, output_schema)
+        .map_err(|e| format!("render_prompt: {e:?}"))
+}
+
+/// Atomically write the rendered worker prompt into the task workspace as
+/// `PROMPT.md` (tmp file + rename; a worker must never see a half-written
+/// prompt).
+fn write_prompt_to_workspace(
+    workspace_path: &std::path::Path,
+    prompt_text: &str,
+) -> Result<(), String> {
+    let path = workspace_path.join("PROMPT.md");
+    let tmp = workspace_path.join("PROMPT.md.tmp");
+    std::fs::write(&tmp, prompt_text)
+        .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename {}: {e}", path.display()))?;
+    Ok(())
+}
+
 /// DRV-01: the self-hosting driver.
 pub struct Driver {
     config: DriverConfig,
@@ -210,6 +245,14 @@ impl Driver {
             Some(path) => Some(load_verifiers(path)?),
             None => None,
         };
+        // Fail closed on degraded mode: without verifiers, gates would follow
+        // unverified receipt claims. The operator must either configure
+        // `verifiers_path` or explicitly opt in with `allow_degraded`.
+        if verifiers.is_none() && !config.allow_degraded {
+            return Err(DriverError::InvalidConfig(
+                "verifiers_path is not set and allow_degraded is false: refusing to run in degraded mode, where task gates would follow unverified receipt claims. Configure verifiers_path, or set allow_degraded=true to explicitly opt in to degraded mode.".to_string(),
+            ));
+        }
         Ok(Self { config, verifiers })
     }
 
@@ -251,6 +294,22 @@ impl Driver {
             max_tokens: 8192,
         };
         let output_schema = serde_json::json!({"type": "object"});
+
+        // The manifest is the run's governing policy: its content digest
+        // pins the policy the worker prompts were rendered under. Re-read
+        // here (it was validated in `new`) so the digest covers exactly the
+        // bytes the DAG was built from.
+        let manifest_bytes = std::fs::read(&cfg.manifest_path).map_err(|e| {
+            DriverError::Manifest(format!(
+                "cannot re-read {}: {e}",
+                cfg.manifest_path.display()
+            ))
+        })?;
+        let policy_digest = digest_bytes(&manifest_bytes).0;
+        let shared = SharedContracts {
+            fabric_version: env!("CARGO_PKG_VERSION").to_string(),
+            policy_digest,
+        };
 
         let mut log = load_event_log(&run_dir)?;
         let mut gates: GateVerdicts = HashMap::new();
@@ -305,7 +364,21 @@ impl Driver {
                     .get(task_id)
                     .cloned()
                     .ok_or_else(|| DriverError::Graph(format!("no contract for {task_id}")))?;
-                let prompt_digest = digest_bytes(contract.objective.as_bytes()).0;
+                // Render the T019 compartmented worker prompt. The driver holds
+                // no requirement corpus, so requirements are empty by
+                // construction — the prompt carries the contract, the
+                // identifiers, the output schema, and the RULES, and nothing
+                // else. The rendered text is dropped into the task workspace
+                // as PROMPT.md (the worker's whole world); the envelope's
+                // prompt_digest pins its exact bytes.
+                let rendered =
+                    render_worker_prompt(&contract, &output_schema, &shared).map_err(|e| {
+                        DriverError::Dispatch(format!("{task_id}: prompt render: {e}"))
+                    })?;
+                write_prompt_to_workspace(&ws.path, &rendered.text).map_err(|e| {
+                    DriverError::Dispatch(format!("{task_id}: prompt write: {e}"))
+                })?;
+                let prompt_digest = rendered.digest;
 
                 let envelope: DispatchEnvelope = create_envelope(
                     contract,
@@ -963,6 +1036,8 @@ mod tests {
             max_waves: 5,
             wave_timeout_ms: 10_000,
             verifiers_path: None,
+            // Existing tests exercise degraded mode; the opt-in is explicit.
+            allow_degraded: true,
         }
     }
 
@@ -1368,6 +1443,8 @@ mod tests {
         let verifiers = write_verifiers_file(&d, &["sh", "-c", "exit 0"]);
         let mut cfg = config_for(&d, &manifest);
         cfg.verifiers_path = Some(verifiers);
+        // Verifier mode needs no degraded opt-in.
+        cfg.allow_degraded = false;
         let driver = Driver::new(cfg).unwrap();
 
         let run_dir = d.join("run");
@@ -1403,6 +1480,8 @@ mod tests {
         let verifiers = write_verifiers_file(&d, &["sh", "-c", "exit 1"]);
         let mut cfg = config_for(&d, &manifest);
         cfg.verifiers_path = Some(verifiers);
+        // Verifier mode needs no degraded opt-in.
+        cfg.allow_degraded = false;
         cfg.max_waves = 1;
         let driver = Driver::new(cfg).unwrap();
 
@@ -1471,6 +1550,133 @@ mod tests {
             fabric_types::Verdict::Pass,
             "workspace with only wrong.txt must not pass file-exists:out.txt"
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Minimal contract for prompt-render tests.
+    fn prompt_test_contract() -> TaskContract {
+        TaskContract::builder(
+            TaskId::new("T001").unwrap(),
+            TaskClass::Implement,
+            "write out.txt",
+        )
+        .spec_revision("test")
+        .inputs(vec!["i".to_string()])
+        .outputs(vec!["out.txt".to_string()])
+        .scope(Scope::new(vec!["out.txt".to_string()]).unwrap())
+        .verifiers(vec!["v".to_string()])
+        .acceptance(vec![AcceptancePredicate::new("file-exists:out.txt", "out.txt exists", true)
+            .unwrap()])
+        .build()
+        .unwrap()
+    }
+
+    fn prompt_test_shared() -> SharedContracts {
+        SharedContracts {
+            fabric_version: "test".to_string(),
+            policy_digest: "sha256:test".to_string(),
+        }
+    }
+
+    #[test]
+    fn render_worker_prompt_contains_rules_and_is_deterministic() {
+        let contract = prompt_test_contract();
+        let schema = serde_json::json!({"type": "object"});
+        let shared = prompt_test_shared();
+        let p1 = render_worker_prompt(&contract, &schema, &shared).unwrap();
+        let p2 = render_worker_prompt(&contract, &schema, &shared).unwrap();
+        // The T019 compartmented RULES reach the worker prompt.
+        assert!(p1.text.contains("## RULES"), "prompt missing RULES section");
+        assert!(
+            p1.text.contains("compartmented"),
+            "prompt missing compartmentation rule"
+        );
+        // Deterministic: same inputs → byte-identical text and digest.
+        assert_eq!(p1.text, p2.text);
+        assert_eq!(p1.digest, p2.digest);
+        // The digest pins the exact rendered bytes.
+        assert_eq!(p1.digest, digest_bytes(p1.text.as_bytes()).0);
+    }
+
+    #[test]
+    fn new_rejects_degraded_without_opt_in() {
+        let d = tmpdir("degopt");
+        let manifest = manifest_two_tasks(&d);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = None;
+        cfg.allow_degraded = false;
+        let err = match Driver::new(cfg) {
+            Ok(_) => panic!("Driver::new must reject degraded mode without opt-in"),
+            Err(e) => e,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("degraded"), "error must name degraded mode: {msg}");
+        assert!(
+            msg.contains("verifiers_path"),
+            "error must tell the operator what to configure: {msg}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn degraded_opt_in_run_flags_degraded() {
+        // allow_degraded=true preserves the old behavior: the run proceeds
+        // on receipt claims and the report flags verification_degraded.
+        let d = tmpdir("degflag");
+        let manifest = manifest_capability_predicate(&d);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = None;
+        cfg.allow_degraded = true;
+        cfg.max_waves = 1;
+        let driver = Driver::new(cfg).unwrap();
+        let run_dir = d.join("run");
+        let seeder = spawn_pass_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+        assert!(report.verification_degraded, "degraded run must be flagged");
+        assert_eq!(report.tasks[0].gate, "pass");
+        assert!(!report.tasks[0].verified);
+        assert!(report.tasks[0].verdict_digest.is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn prompt_written_to_workspace_pins_digest() {
+        // End-to-end: the rendered prompt lands in the task workspace as
+        // PROMPT.md, and the envelope's prompt_digest pins its exact bytes.
+        let d = tmpdir("promptws");
+        let manifest = manifest_capability_predicate(&d);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = None;
+        cfg.allow_degraded = true;
+        cfg.max_waves = 1;
+        let driver = Driver::new(cfg).unwrap();
+        let run_dir = d.join("run");
+        let seeder = spawn_pass_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+        assert_eq!(report.outcome, WaveOutcome::Complete);
+
+        let prompt_path = run_dir.join("workspaces").join("T001-a1").join("PROMPT.md");
+        assert!(prompt_path.is_file(), "missing {prompt_path:?}");
+        let text = std::fs::read_to_string(&prompt_path).unwrap();
+        assert!(text.contains("## RULES"), "PROMPT.md missing compartmented RULES");
+
+        let outbox = run_dir.join("outbox");
+        let mut found = false;
+        for entry in std::fs::read_dir(&outbox).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_str().unwrap().to_string();
+            if name.ends_with(".json") && !name.ends_with(".receipt.json") {
+                let env: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap();
+                assert_eq!(env["prompt_digest"], digest_bytes(text.as_bytes()).0);
+                found = true;
+            }
+        }
+        assert!(found, "no envelope found in outbox");
         let _ = std::fs::remove_dir_all(&d);
     }
 
