@@ -1,2 +1,6 @@
 /target/
 Cargo.lock
+
+# dogfood run artifacts: nested git repos (driver workspaces)
+dogfood/run1/.driver-repo/
+dogfood/run1/workspaces/
