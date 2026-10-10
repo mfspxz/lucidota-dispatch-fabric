@@ -679,8 +679,22 @@ fn load_verifiers(path: &std::path::Path) -> Result<VerifierRegistry, DriverErro
 /// before the first `':'`. A predicate id with no `':'` matches verifiers
 /// whose capability equals the whole id. Matching is string equality, never
 /// prefix or substring.
+///
+/// The part after the first `':'`, when present, is the predicate's
+/// parameter and is appended to the verifier's argv as a single argument
+/// (no shell interpretation — argv only). This binds the evidence to the
+/// specific subject: a verifier for capability `file-exists` invoked as
+/// `[script, "one.txt"]` can only produce evidence about `one.txt`, so an
+/// exit-0 run for the wrong file can never satisfy this predicate. Predicate
+/// ids come from the operator-authored manifest, never from worker output,
+/// so parameter injection by a worker is not possible.
 fn capability_of(predicate_id: &str) -> &str {
     predicate_id.split(':').next().unwrap_or(predicate_id)
+}
+
+/// The predicate parameter: the part after the first `':'`, if any.
+fn predicate_param(predicate_id: &str) -> Option<&str> {
+    predicate_id.split_once(':').map(|(_, param)| param)
 }
 
 /// Run the registered verifiers for one task attempt and produce the
@@ -729,14 +743,21 @@ fn verify_with_verifiers(
         let mut first_command: Vec<String> = Vec::new();
         let mut first_version = "none".to_string();
         for (i, reg) in verifiers.iter().enumerate() {
+            // The verifier's argv is its registered command plus the
+            // predicate parameter (if any): the evidence an exit-0 run
+            // produces is thereby bound to this predicate's subject.
+            let mut argv = reg.command.clone();
+            if let Some(param) = predicate_param(&pred.id) {
+                argv.push(param.to_string());
+            }
             if i == 0 {
-                first_command = reg.command.clone();
+                first_command = argv.clone();
                 first_version = reg.version.clone();
             }
             // The child environment starts empty (env_allowlist is empty):
             // secret-bearing variables never reach a verifier by default.
             let outcome = execute(&ExecConfig {
-                argv: reg.command.clone(),
+                argv,
                 workdir: Some(workspace_path.to_path_buf()),
                 env_allowlist: Vec::new(),
                 timeout_ms: reg.timeout_ms,
@@ -1357,6 +1378,58 @@ mod tests {
         assert_eq!(t.gate, "fail", "{t:?}");
         assert!(t.verified, "{t:?}");
         assert!(t.verdict_digest.is_some(), "{t:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn verifier_param_binding_wrong_file_does_not_pass() {
+        // Regression: the predicate parameter (the part after ':') is
+        // appended to the verifier argv, binding the evidence to the
+        // specific subject. A workspace holding the WRONG file must not
+        // satisfy "file-exists:out.txt".
+        let d = tmpdir("verparam");
+        let ws = d.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join("wrong.txt"), b"decoy").unwrap();
+
+        let mut registry = VerifierRegistry::new();
+        registry
+            .register(VerifierRegistration {
+                id: "v-param".to_string(),
+                classes: vec![TaskClass::Implement],
+                capability: VerifierCapability("file-exists".to_string()),
+                command: vec!["test".to_string(), "-f".to_string()],
+                version: "1".to_string(),
+                timeout_ms: 5_000,
+                max_output_bytes: 65_536,
+            })
+            .unwrap();
+
+        let contract = TaskContract::builder(
+            TaskId::new("T001").unwrap(),
+            TaskClass::Implement,
+            "write out.txt",
+        )
+        .spec_revision("test")
+        .inputs(vec!["i".to_string()])
+        .outputs(vec!["out.txt".to_string()])
+        .scope(Scope::new(vec!["out.txt".to_string()]).unwrap())
+        .verifiers(vec!["v-param".to_string()])
+        .acceptance(vec![AcceptancePredicate::new(
+            "file-exists:out.txt",
+            "out.txt exists",
+            true,
+        )
+        .unwrap()])
+        .build()
+        .unwrap();
+
+        let receipt = verify_with_verifiers(&registry, &contract, &ws).unwrap();
+        assert_ne!(
+            receipt.overall,
+            fabric_types::Verdict::Pass,
+            "workspace with only wrong.txt must not pass file-exists:out.txt"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 
