@@ -1,0 +1,32 @@
+{
+  "outcome": "BudgetExhausted",
+  "waves_run": 10,
+  "tasks": [
+    {
+      "task_id": "DOG-A",
+      "waves_waited": 1,
+      "gate": "fail",
+      "receipt_digest": "sha256:dfa0f87449518da5aeacdbc410e9946a2b457ea16603f8e0d2f3f6e36446fce5",
+      "verified": true,
+      "verdict_digest": "fnv1a64:3bb272288db6d470"
+    },
+    {
+      "task_id": "DOG-B",
+      "waves_waited": 10,
+      "gate": "unstarted",
+      "receipt_digest": null,
+      "verified": false,
+      "verdict_digest": null
+    },
+    {
+      "task_id": "DOG-C",
+      "waves_waited": 10,
+      "gate": "unstarted",
+      "receipt_digest": null,
+      "verified": false,
+      "verdict_digest": null
+    }
+  ],
+  "run_dir": "dogfood/run2a",
+  "verification_degraded": false
+}

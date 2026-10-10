@@ -4,3 +4,7 @@ Cargo.lock
 # dogfood run artifacts: nested git repos (driver workspaces)
 dogfood/run1/.driver-repo/
 dogfood/run1/workspaces/
+dogfood/run2a/.driver-repo/
+dogfood/run2a/workspaces/
+dogfood/run2b/.driver-repo/
+dogfood/run2b/workspaces/

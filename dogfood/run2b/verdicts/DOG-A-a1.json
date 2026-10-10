@@ -1,0 +1,19 @@
+{
+  "requirement_id": "DOG-A",
+  "predicates": [
+    {
+      "predicate_id": "file-exists:one.txt",
+      "outcome": "PASS",
+      "command": [
+        "/home/hatch/workspace/dispatch-fabric/dogfood/bin/check-file-exists.sh",
+        "one.txt"
+      ],
+      "verifier_version": "1",
+      "evidence_digests": [
+        "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ]
+    }
+  ],
+  "overall": "PASS",
+  "receipt_digest": "fnv1a64:c2c6954e1409c500"
+}

@@ -1,1 +1,1 @@
-[{"capability":"file-exists","classes":["Implement"],"command":["/home/hatch/workspace/dispatch-fabric/dogfood/bin/check-file-exists.sh"],"id":"dogfood-file-exists","max_output_bytes":4096,"timeout_ms":5000,"version":"1"}]
+[{"capability":"file-exists","classes":["IMPLEMENT"],"command":["/home/hatch/workspace/dispatch-fabric/dogfood/bin/check-file-exists.sh"],"id":"dogfood-file-exists","max_output_bytes":4096,"timeout_ms":5000,"version":"1"}]
