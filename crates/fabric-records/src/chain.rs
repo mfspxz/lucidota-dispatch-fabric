@@ -104,6 +104,23 @@ impl EventLog {
         Self::default()
     }
 
+    /// Build a log from records read off disk, verifying the whole chain.
+    ///
+    /// This is the choke point for untrusted input: any `EventLog`
+    /// reconstructed from persisted bytes must pass through here, so a
+    /// tampered log can never become a live in-memory log. Fresh logs built
+    /// with `new()` + `append()` are verified-by-construction and do not
+    /// need this path.
+    ///
+    /// Trust statement: the hash chain detects alteration of recorded
+    /// events; it does not authenticate the writer — anyone with write
+    /// access could recompute a valid chain. It is a tripwire, not a lock.
+    pub fn from_records(records: Vec<EventRecord>) -> Result<Self> {
+        let log = Self { records };
+        log.verify()?;
+        Ok(log)
+    }
+
     /// Append an event. The record's seq is the next monotonic number and
     /// its prev_hash is the current head. Returns the appended record.
     pub fn append(&mut self, event: FabricEvent) -> EventRecord {
@@ -299,5 +316,50 @@ mod tests {
         let json = serde_json::to_vec(&log.records).unwrap();
         let back: Vec<EventRecord> = serde_json::from_slice(&json).unwrap();
         assert_eq!(back, log.records);
+    }
+
+    #[test]
+    fn from_records_accepts_valid_chain() {
+        let mut log = EventLog::new();
+        log.append(test_event(1));
+        log.append(test_event(2));
+        let records = log.records().to_vec();
+        let head = log.head_hash();
+        let rebuilt = EventLog::from_records(records).unwrap();
+        assert_eq!(rebuilt.head_hash(), head);
+        assert_eq!(rebuilt.records().len(), 2);
+        // Appends continue the chain at the right seq.
+        let mut rebuilt = rebuilt;
+        let r = rebuilt.append(test_event(3));
+        assert_eq!(r.seq, 2);
+        assert_eq!(rebuilt.verify(), Ok(()));
+    }
+
+    #[test]
+    fn from_records_rejects_tampered_chain() {
+        let mut log = EventLog::new();
+        log.append(test_event(1));
+        log.append(test_event(2));
+        let mut records = log.records().to_vec();
+        // Flip one byte of the first record's event payload.
+        records[0].event.timestamp_ms = 999;
+        let err = EventLog::from_records(records).unwrap_err();
+        assert!(matches!(err, FabricError::InvalidInput { .. }));
+        assert!(format!("{:?}", err).contains("record_hash mismatch"));
+    }
+
+    #[test]
+    fn from_records_rejects_broken_seq() {
+        let mut log = EventLog::new();
+        log.append(test_event(1));
+        let mut records = log.records().to_vec();
+        records[0].seq = 5;
+        assert!(EventLog::from_records(records).is_err());
+    }
+
+    #[test]
+    fn from_records_accepts_empty() {
+        let log = EventLog::from_records(Vec::new()).unwrap();
+        assert_eq!(log.head_hash(), RecordHash::genesis());
     }
 }
