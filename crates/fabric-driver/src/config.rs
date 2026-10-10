@@ -11,8 +11,6 @@ pub struct DriverConfig {
     pub manifest_path: PathBuf,
     /// Root directory for this run: workspaces, outbox, inbox, records.
     pub work_root: PathBuf,
-    /// How often to poll the inbox for receipts, milliseconds.
-    pub poll_interval_ms: u64,
     /// Maximum waves before the driver stops with BudgetExhausted.
     pub max_waves: u32,
     /// Maximum time to wait for a wave's receipts, milliseconds.
