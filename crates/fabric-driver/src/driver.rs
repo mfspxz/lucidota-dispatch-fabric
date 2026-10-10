@@ -54,10 +54,11 @@ use fabric_verify::predicates::{
 };
 use fabric_verify::registry::{VerifierCapability, VerifierRegistration, VerifierRegistry};
 use fabric_verify::verdict::{PredicateVerdict, VerdictBuilder};
+use fabric_workspace::scope::{check_scope_paths, workspace_changed_paths};
 use fabric_workspace::workspace::{create_workspace, WorkspaceConfig};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -290,6 +291,13 @@ impl Driver {
 
             waves_run += 1;
 
+            // FIX-1 (RT2-001): snapshot driver-owned names BEFORE dispatch.
+            // The worker can only act after reading its envelope, so the
+            // race is closed by construction: anything not in these
+            // snapshots (and not driver-written this wave) is a plant.
+            let outbox_snapshot = dir_names(&run_dir.join("outbox"))?;
+            let root_snapshot = dir_names(&run_dir)?;
+
             // Dispatch every ready task.
             let mut expected: Vec<String> = Vec::new();
             let mut digest_to_task: HashMap<String, TaskId> = HashMap::new();
@@ -359,14 +367,14 @@ impl Driver {
                         ))
                     })?;
                 let attempt = attempts.get(&task_id).copied().unwrap_or(1);
+                let contract = contracts.get(&task_id).ok_or_else(|| {
+                    DriverError::Graph(format!("no contract for {task_id}"))
+                })?;
+                let ws_path = workspace_paths.get(&task_id).ok_or_else(|| {
+                    DriverError::Workspace(format!("no workspace path for {task_id}"))
+                })?;
                 let (verdict, verified, verdict_digest) = match &self.verifiers {
                     Some(registry) => {
-                        let contract = contracts.get(&task_id).ok_or_else(|| {
-                            DriverError::Graph(format!("no contract for {task_id}"))
-                        })?;
-                        let ws_path = workspace_paths.get(&task_id).ok_or_else(|| {
-                            DriverError::Workspace(format!("no workspace path for {task_id}"))
-                        })?;
                         let vr = verify_with_verifiers(registry, contract, ws_path)?;
                         write_verdict_receipt(&run_dir, &task_id, attempt, &vr)?;
                         (
@@ -378,6 +386,53 @@ impl Driver {
                     None => {
                         let verdict = parse_receipt_verdict(receipt)?;
                         (verdict, false, None)
+                    }
+                };
+                // FIX-1 (RT2-001): scope enforcement, in BOTH verifier and
+                // degraded modes. The worker's footprint must stay inside
+                // the contract's allowed_scope, and nothing may appear in
+                // driver-owned run state. Any violation — or any failure
+                // to check — forces the gate to Fail; it is logged as a
+                // policy denial. Never skipped, never a pass.
+                let verdict = match enforce_scope(
+                    contract,
+                    ws_path,
+                    &run_dir,
+                    &outbox_snapshot,
+                    &root_snapshot,
+                    &expected,
+                ) {
+                    Ok(violations) if violations.is_empty() => verdict,
+                    Ok(violations) => {
+                        log.append(
+                            FabricEvent::new(
+                                now_ms(),
+                                task_id.clone(),
+                                attempt,
+                                EventPayload::Deny {
+                                    reason: format!(
+                                        "scope violation: {}",
+                                        violations.join("; ")
+                                    ),
+                                },
+                            )
+                            .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
+                        );
+                        Verdict::Fail
+                    }
+                    Err(e) => {
+                        log.append(
+                            FabricEvent::new(
+                                now_ms(),
+                                task_id.clone(),
+                                attempt,
+                                EventPayload::Deny {
+                                    reason: format!("scope check failed closed: {e:?}"),
+                                },
+                            )
+                            .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
+                        );
+                        Verdict::Fail
                     }
                 };
                 log.append(
@@ -690,6 +745,99 @@ fn capability_of(predicate_id: &str) -> &str {
 /// The predicate parameter: the part after the first `':'`, if any.
 fn predicate_param(predicate_id: &str) -> Option<&str> {
     predicate_id.split_once(':').map(|(_, param)| param)
+}
+
+/// FIX-1 (RT2-001): names of entries directly inside `dir` (files and
+/// dirs, not recursive). The caller decides what a new name means.
+fn dir_names(dir: &Path) -> Result<HashSet<String>, DriverError> {
+    let mut set = HashSet::new();
+    let entries = std::fs::read_dir(dir).map_err(|e| {
+        DriverError::Backend(format!(
+            "run-state snapshot: cannot read {}: {e}",
+            dir.display()
+        ))
+    })?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|e| DriverError::Backend(format!("run-state snapshot: bad dir entry: {e}")))?;
+        set.insert(entry.file_name().to_string_lossy().to_string());
+    }
+    Ok(set)
+}
+
+/// FIX-1 (RT2-001): enforce scope for one task attempt.
+///
+/// Two layers, both fail-closed:
+/// 1. The worker's footprint inside its workspace (untracked + modified +
+///    staged, via `git status`) must lie within the contract's
+///    `allowed_scope` (T072).
+/// 2. Nothing the driver didn't write may have appeared in the outbox or
+///    at the run_dir root since dispatch. The snapshots are taken BEFORE
+///    dispatch — the worker can only act after reading its envelope, so
+///    the race is closed by construction. This wave's envelope files are
+///    allowlisted (driver-written); `events.jsonl` and `verdicts/` are
+///    fixed driver-owned names. The inbox is the only sanctioned worker
+///    channel and is never checked.
+///
+/// Returns human-readable violation strings (`workspace:<path>` /
+/// `outbox:<file>` / `run_state:<name>`); empty means clean. Any
+/// infrastructure failure is an `Err`, and the caller forces the gate to
+/// Fail — a check that cannot run is never treated as a pass.
+///
+/// Residual (documented, out of scope): plants deeper than one level
+/// (another wave's workspace internals, `.driver-repo` innards) are not
+/// listed here. `.driver-repo` tampering fail-closes anyway: layer 1's
+/// `git status` errors on a corrupt repo. A plant inside another task's
+/// workspace is caught by that task's own layer-1 check when it falls
+/// outside its allowed_scope.
+fn enforce_scope(
+    contract: &TaskContract,
+    ws_path: &Path,
+    run_dir: &Path,
+    outbox_snapshot: &HashSet<String>,
+    root_snapshot: &HashSet<String>,
+    expected_digests: &[String],
+) -> Result<Vec<String>, DriverError> {
+    let mut violations = Vec::new();
+
+    // Layer 1: workspace footprint vs allowed_scope.
+    let changed = workspace_changed_paths(ws_path).map_err(|e| {
+        DriverError::Workspace(format!("scope diff failed for {}: {e:?}", ws_path.display()))
+    })?;
+    for p in check_scope_paths(&contract.scope, &changed) {
+        violations.push(format!("workspace:{p}"));
+    }
+
+    // Layer 2a: outbox integrity — the driver alone writes here.
+    let envelope_files: HashSet<String> = expected_digests
+        .iter()
+        .map(|d| format!("{d}.json"))
+        .collect();
+    let outbox_now = dir_names(&run_dir.join("outbox"))?;
+    let mut plants: Vec<String> = outbox_now
+        .difference(outbox_snapshot)
+        .filter(|n| !envelope_files.contains(*n))
+        .cloned()
+        .collect();
+    plants.sort();
+    for p in plants {
+        violations.push(format!("outbox:{p}"));
+    }
+
+    // Layer 2b: run_dir root — the driver creates no top-level entries per
+    // wave except the event log and the verdicts dir (fixed names).
+    let root_now = dir_names(run_dir)?;
+    let mut drops: Vec<String> = root_now
+        .difference(root_snapshot)
+        .filter(|n| n.as_str() != "events.jsonl" && n.as_str() != "verdicts")
+        .cloned()
+        .collect();
+    drops.sort();
+    for p in drops {
+        violations.push(format!("run_state:{p}"));
+    }
+
+    Ok(violations)
 }
 
 /// Run the registered verifiers for one task attempt and produce the
@@ -1415,6 +1563,240 @@ mod tests {
             receipt.overall,
             fabric_types::Verdict::Pass,
             "workspace with only wrong.txt must not pass file-exists:out.txt"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // --- FIX-1 (RT2-001): scope enforcement tests ---
+
+    fn test_contract() -> TaskContract {
+        TaskContract::builder(
+            TaskId::new("T001").unwrap(),
+            TaskClass::Implement,
+            "write out.txt",
+        )
+        .spec_revision("test")
+        .inputs(vec!["i".to_string()])
+        .outputs(vec!["out.txt".to_string()])
+        .scope(Scope::new(vec!["out.txt".to_string()]).unwrap())
+        .verifiers(vec!["v".to_string()])
+        .acceptance(vec![AcceptancePredicate::new(
+            "file-exists:out.txt",
+            "out.txt exists",
+            true,
+        )
+        .unwrap()])
+        .build()
+        .unwrap()
+    }
+
+    /// FIX-1: RT2 probe simulator. Does the honest work (writes out.txt
+    /// into the task workspace) and, depending on the probe, plants stray
+    /// files: inside the workspace (outside allowed_scope), in the outbox,
+    /// or at the run_dir root. Plant names embed the envelope digest so a
+    /// retry wave sees a fresh plant. Always drops a pass-claim receipt.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ProbeKind {
+        Clean,
+        WorkspaceStray,
+        OutboxPlant,
+        RunRootPlant,
+    }
+
+    fn spawn_probe_seeder(run_dir: PathBuf, probe: ProbeKind) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            let mut done: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                let outbox = run_dir.join("outbox");
+                if outbox.is_dir() {
+                    for entry in std::fs::read_dir(&outbox).unwrap() {
+                        let entry = entry.unwrap();
+                        let name = entry.file_name().to_str().unwrap().to_string();
+                        if !name.ends_with(".json") || name.ends_with(".receipt.json") {
+                            continue;
+                        }
+                        let digest = name.trim_end_matches(".json").to_string();
+                        if done.contains(&digest) {
+                            continue;
+                        }
+                        let env: serde_json::Value = serde_json::from_slice(
+                            &std::fs::read(entry.path()).unwrap(),
+                        )
+                        .unwrap();
+                        let ws_id = env["workspace"].as_str().unwrap().to_string();
+                        let ws_path = run_dir.join("workspaces").join(&ws_id);
+                        for _ in 0..100 {
+                            if ws_path.is_dir() {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        // Honest work first.
+                        std::fs::write(ws_path.join("out.txt"), b"done\n").unwrap();
+                        // Then the probe's stray writes.
+                        let tag = &digest[..digest.len().min(12)];
+                        match probe {
+                            ProbeKind::WorkspaceStray => {
+                                std::fs::write(
+                                    ws_path.join(format!("stray-{tag}.txt")),
+                                    b"stray\n",
+                                )
+                                .unwrap();
+                            }
+                            ProbeKind::OutboxPlant => {
+                                std::fs::write(
+                                    outbox.join(format!("planted-{tag}.txt")),
+                                    b"plant\n",
+                                )
+                                .unwrap();
+                            }
+                            ProbeKind::RunRootPlant => {
+                                std::fs::write(
+                                    run_dir.join(format!("evil-{tag}.txt")),
+                                    b"evil\n",
+                                )
+                                .unwrap();
+                            }
+                            ProbeKind::Clean => {}
+                        }
+                        let rp = run_dir.join("inbox").join(format!("{digest}.receipt.json"));
+                        let body = serde_json::json!({
+                            "envelope_digest": digest,
+                            "verdict": "pass",
+                        });
+                        write_atomic_test(&rp, &serde_json::to_vec(&body).unwrap());
+                        done.insert(digest);
+                    }
+                }
+                if std::time::Instant::now() > deadline || run_dir.join("DONE").exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        })
+    }
+
+    /// Run one task with the probe seeder; return the final report.
+    fn run_with_probe(
+        dir: &std::path::Path,
+        manifest: &std::path::Path,
+        probe: ProbeKind,
+        verifiers: Option<PathBuf>,
+    ) -> DriverReport {
+        let mut cfg = config_for(dir, manifest);
+        cfg.verifiers_path = verifiers;
+        // One wave is enough: the gate decision is made on the first attempt.
+        cfg.max_waves = 1;
+        let driver = Driver::new(cfg).unwrap();
+        let run_dir = dir.join("run");
+        let seeder = spawn_probe_seeder(run_dir.clone(), probe);
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+        report
+    }
+
+    fn deny_events(run_dir: &std::path::Path) -> Vec<String> {
+        let log = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+        log.lines()
+            .filter(|l| l.contains("\"op\":\"DENY\""))
+            .map(|l| l.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn scope_clean_attempt_passes_gate() {
+        // Guard against false positives: honest work inside allowed_scope,
+        // nothing planted → gate pass, no Deny events.
+        let d = tmpdir("fix1clean");
+        let manifest = manifest_capability_predicate(&d);
+        let verifiers = write_verifiers_file(&d, &["test", "-f"]);
+        let report = run_with_probe(&d, &manifest, ProbeKind::Clean, Some(verifiers));
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "pass", "{t:?}");
+        assert!(t.verified, "{t:?}");
+        assert!(deny_events(&d.join("run")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scope_workspace_stray_fails_gate() {
+        // RT2 probe, layer 1: required work done AND a stray file in the
+        // workspace outside allowed_scope → gate fail, verdict recorded.
+        let d = tmpdir("fix1ws");
+        let manifest = manifest_capability_predicate(&d);
+        let verifiers = write_verifiers_file(&d, &["test", "-f"]);
+        let report = run_with_probe(&d, &manifest, ProbeKind::WorkspaceStray, Some(verifiers));
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        assert!(t.verified, "{t:?}");
+        let denies = deny_events(&d.join("run"));
+        assert_eq!(denies.len(), 1, "{denies:?}");
+        assert!(denies[0].contains("scope violation"), "{denies:?}");
+        assert!(denies[0].contains("workspace:stray-"), "{denies:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scope_outbox_plant_fails_gate() {
+        // RT2 probe, layer 2: required work done AND a file planted in the
+        // driver's outbox → gate fail.
+        let d = tmpdir("fix1ob");
+        let manifest = manifest_capability_predicate(&d);
+        let verifiers = write_verifiers_file(&d, &["test", "-f"]);
+        let report = run_with_probe(&d, &manifest, ProbeKind::OutboxPlant, Some(verifiers));
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        let denies = deny_events(&d.join("run"));
+        assert_eq!(denies.len(), 1, "{denies:?}");
+        assert!(denies[0].contains("outbox:planted-"), "{denies:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scope_runroot_plant_fails_gate() {
+        // RT2 probe, layer 2: required work done AND a file dropped at the
+        // run_dir root → gate fail.
+        let d = tmpdir("fix1rr");
+        let manifest = manifest_capability_predicate(&d);
+        let verifiers = write_verifiers_file(&d, &["test", "-f"]);
+        let report = run_with_probe(&d, &manifest, ProbeKind::RunRootPlant, Some(verifiers));
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        let denies = deny_events(&d.join("run"));
+        assert_eq!(denies.len(), 1, "{denies:?}");
+        assert!(denies[0].contains("run_state:evil-"), "{denies:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scope_degraded_mode_stray_still_fails_gate() {
+        // Scope enforcement is independent of verifier mode: degraded mode
+        // (receipt claim only) plus a workspace stray → gate fail.
+        let d = tmpdir("fix1deg");
+        let manifest = manifest_capability_predicate(&d);
+        let report = run_with_probe(&d, &manifest, ProbeKind::WorkspaceStray, None);
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        assert!(!t.verified, "{t:?}");
+        assert!(!deny_events(&d.join("run")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn enforce_scope_git_failure_is_fail_closed() {
+        // The diff cannot run (not a git repo) → Err, and the caller must
+        // treat it as gate fail, never skip.
+        let d = tmpdir("fix1nogit");
+        let ws = d.join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let contract = test_contract();
+        let err = enforce_scope(&contract, &ws, &d, &HashSet::new(), &HashSet::new(), &[])
+            .unwrap_err();
+        assert!(
+            matches!(err, DriverError::Workspace(_)),
+            "expected Workspace error, got {err:?}"
         );
         let _ = std::fs::remove_dir_all(&d);
     }
