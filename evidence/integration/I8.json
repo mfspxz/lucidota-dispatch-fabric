@@ -1,0 +1,49 @@
+{
+  "phase": "I8",
+  "scope": "DS1/DS2/DS3 review repairs (FIX-5) + dogfood v5",
+  "candidate_reviewed": "f629017729c02bc790c7bffd3e6ac08913d690ce",
+  "reviews": {
+    "DS1": {
+      "findings": "1 high, 4 medium, 4 low",
+      "receipt": "evidence/audits/DS1-findings.json"
+    },
+    "DS2": {
+      "findings": "1 high (confirms DS1-001), 2 low, 2 info",
+      "receipt": "evidence/audits/DS2-findings.json",
+      "dispositions": "RT2-001 partial (layer2 fixed, layer1 bypassed); RT2-002/003/004/006/008 confirmed-fixed; RT2-005/007/010 open-by-design"
+    },
+    "DS3": {
+      "findings": "10/10 repaired findings closed with independent evidence; 1 HIGH new (confirms DS1-001)",
+      "receipt": "evidence/audits/DS3-findings.json",
+      "verdict": "CONDITIONAL PASS",
+      "measured": "740 passed, 0 failed, clippy 0 warnings"
+    }
+  },
+  "deviation": "spec's DeepSeek passes performed by independent agents (deepseek-chat unusable: leaks chain-of-thought); independence holds",
+  "repairs": {
+    "FIX-5": "baseline-pinned scope diff (DS1-001/DS2-001/DS3-NEW-001); quarantine scope+events (DS1-002/004); scope_violations in report (DS1-003); failure_path advisory (DS1-005); digest truncation (DS2-002); unpredictable workspace IDs (DS2-003); DS2-005 documented residual"
+  },
+  "dogfood_v5": {
+    "launder_attack": {
+      "dir": "dogfood/run5",
+      "gates": "DOG-A fail, scope_violations=[workspace:stray.txt, run_state:root-stray.txt], DENY logged; DOG-B/C blocked",
+      "outcome": "Stalled",
+      "replays": "worker commits strays before receipt"
+    },
+    "honest_run": {
+      "dir": "dogfood/run5b",
+      "gates": "all pass, all verified, no violations",
+      "outcome": "Complete",
+      "waves": 3
+    }
+  },
+  "child_receipts": [
+    "evidence/receipts/FIX-5.json"
+  ],
+  "tests": {
+    "passed": 747,
+    "failed": 0,
+    "clippy_warnings": 0
+  },
+  "verdict": "PASS"
+}
