@@ -76,6 +76,12 @@ pub enum EventPayload {
         envelope_digest: String,
         /// Workspace the worker is confined to.
         workspace: String,
+        /// The contract's declared failure-handling path, if any.
+        /// Advisory: recorded in the tamper-evident log at dispatch.
+        /// The driver does not execute it — no action language exists
+        /// for it (DS1-005); the driver's own failure handling
+        /// (quarantine, retry, retire) applies.
+        failure_path: Option<String>,
     },
     /// A worker response arrived (before acceptance — not proof of success).
     Response {
@@ -106,6 +112,15 @@ pub enum EventPayload {
     Deny {
         /// Machine-readable reason code.
         reason: String,
+    },
+    /// A worker receipt was rejected before gating (malformed JSON,
+    /// digest-linkage mismatch, or over the size cap). The task is
+    /// quarantined — its gate fails and it may retry within policy —
+    /// but the run continues. The quarantine is a durable state
+    /// transition, so it gets a chained record (DS1-004).
+    ReceiptRejected {
+        /// Human-readable cause naming the offending receipt file.
+        cause: String,
     },
     /// A reservation or workspace was released without dispatch.
     Release {
@@ -157,6 +172,7 @@ mod tests {
             EventPayload::Dispatch {
                 envelope_digest: "sha256:def".to_string(),
                 workspace: "ws-1".to_string(),
+                failure_path: Some("quarantine artifacts".to_string()),
             },
             EventPayload::Response {
                 response_digest: "sha256:000".to_string(),
@@ -177,6 +193,9 @@ mod tests {
                 commit: "deadbeef".to_string(),
             },
             EventPayload::Deny { reason: "QUOTA_EXHAUSTED".to_string() },
+            EventPayload::ReceiptRejected {
+                cause: "receipt abc123.receipt.json fails to parse: bad json".to_string(),
+            },
             EventPayload::Release { reason: "superseded".to_string() },
         ];
         for p in payloads {

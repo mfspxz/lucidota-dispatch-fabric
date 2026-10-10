@@ -61,6 +61,18 @@ fn stderr_of(out: &std::process::Output) -> String {
     }
 }
 
+/// `n` random bytes from the OS, hex-encoded. Fail-closed when the OS
+/// gives no randomness — an unpredictable workspace ID must not silently
+/// degrade to a predictable one (DS2-003).
+fn random_hex(n: usize) -> Result<String> {
+    use std::io::Read;
+    let mut buf = vec![0u8; n];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .map_err(|e| FabricError::TransportFailure(format!("OS randomness unavailable: {e}")))?;
+    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// Create an isolated worktree for one task attempt, pinned to `base_commit`.
 ///
 /// Contract:
@@ -114,7 +126,20 @@ pub fn create_workspace(
     }
     let base_sha = String::from_utf8_lossy(&resolved.stdout).trim().to_string();
 
-    let id = Workspace::workspace_id(task_id, attempt);
+    // DS2-003: the workspace ID carries a random suffix. A bare
+    // `{task}-a{attempt}` ID is predictable: a wave-1 worker can pre-create
+    // the next attempt's worktree path (or branch) and turn the
+    // fail-on-exists below into a run-killing DoS with no report. The
+    // `{task}-a{attempt}` prefix stays human-readable and deterministic;
+    // the suffix makes the full ID unpredictable. `workspace_id()` itself
+    // is unchanged (frozen interface); uniqueness is a `create_workspace`
+    // property. The branch-exists / path-exists checks below remain as
+    // defense in depth.
+    let id = format!(
+        "{}-{}",
+        Workspace::workspace_id(task_id, attempt),
+        random_hex(8)?
+    );
     // TaskId charset permits '.', so guard against path traversal explicitly.
     if id.contains("..") || id.contains('/') || id.contains('\\') {
         return Err(FabricError::InvalidInput {
@@ -312,18 +337,37 @@ mod tests {
     }
 
     #[test]
-    fn rejects_duplicate_branch_and_path() {
+    fn same_task_attempt_gets_unique_ids() {
+        // DS2-003: workspace IDs are unpredictable per creation. Two
+        // workspaces for the same (task, attempt) must not collide — the
+        // old deterministic ID let a worker pre-create the next attempt's
+        // path/branch and DoS the run. Both creations succeed with
+        // distinct IDs sharing the deterministic `{task}-a{attempt}`
+        // prefix. The branch-exists / path-exists guards remain as
+        // defense in depth against a true random collision.
         let repo = temp_repo();
         let (cfg, _root) = config_for(&repo);
         let sha = base_sha(&repo);
         let task = TaskId::new("T071").unwrap();
 
-        create_workspace(&cfg, &sha, &task, 1).unwrap();
-        let dup = create_workspace(&cfg, &sha, &task, 1);
-        assert!(
-            matches!(dup, Err(FabricError::Conflict(_))),
-            "expected Conflict, got {dup:?}"
-        );
+        let w1 = create_workspace(&cfg, &sha, &task, 1).unwrap();
+        let w2 = create_workspace(&cfg, &sha, &task, 1).unwrap();
+        assert_ne!(w1.id, w2.id, "workspace IDs must be unique");
+        assert_ne!(w1.path, w2.path, "workspace paths must be unique");
+        // Deterministic, human-readable prefix; unpredictable suffix.
+        for w in [&w1, &w2] {
+            assert!(
+                w.id.starts_with(&format!("{}-a1-", task.as_str())),
+                "unexpected id {}",
+                w.id
+            );
+            let suffix = w.id.rsplit('-').next().unwrap();
+            assert_eq!(suffix.len(), 16, "suffix must be 16 hex chars");
+            assert!(
+                suffix.chars().all(|c| c.is_ascii_hexdigit()),
+                "suffix must be hex: {suffix}"
+            );
+        }
         teardown(&repo);
     }
 

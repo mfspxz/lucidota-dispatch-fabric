@@ -56,7 +56,7 @@ use fabric_verify::predicates::{
 };
 use fabric_verify::registry::{VerifierCapability, VerifierRegistration, VerifierRegistry};
 use fabric_verify::verdict::{PredicateVerdict, VerdictBuilder};
-use fabric_workspace::scope::{check_scope_paths, workspace_changed_paths};
+use fabric_workspace::scope::{check_scope_paths, workspace_footprint};
 use fabric_workspace::workspace::{create_workspace, WorkspaceConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -122,6 +122,12 @@ pub struct TaskOutcome {
     /// mismatch, or over the size cap): the human-readable cause naming
     /// the file. None otherwise.
     pub receipt_error: Option<String>,
+    /// Scope violations found by enforcement for this task's latest
+    /// checked attempt (`workspace:<path>` / `outbox:<file>` /
+    /// `run_state:<name>`). Empty when the scope check was clean. A
+    /// confinement escape must not look like an ordinary test failure
+    /// (DS1-003).
+    pub scope_violations: Vec<String>,
 }
 
 /// DRV-01: what `run()` returns.
@@ -331,12 +337,29 @@ impl Driver {
         let mut verified_flags: HashMap<TaskId, bool> = HashMap::new();
         let mut verdict_digests: HashMap<TaskId, String> = HashMap::new();
         let mut receipt_errors: HashMap<TaskId, String> = HashMap::new();
+        // FIX-5 (DS1-001): the scope baseline commit recorded per task
+        // attempt at dispatch, right after the driver commits PROMPT.md.
+        // The scope check diffs the worker's footprint against this pinned
+        // hash — a worker commit cannot hide behind a clean `git status`.
+        let mut workspace_baselines: HashMap<TaskId, String> = HashMap::new();
+        // FIX-5 (DS1-003): scope violations per task for the report, so a
+        // confinement escape is visible as such, not as a test failure.
+        let mut scope_violations: HashMap<TaskId, Vec<String>> = HashMap::new();
         // FIX-3: tasks whose retry policy is exhausted. They keep their
         // terminal fail gate but are never redispatched and never appear
         // in a ready set again.
         let mut retired: HashSet<TaskId> = HashSet::new();
         let mut waves_run: u32 = 0;
         let verification_degraded = self.verifiers.is_none();
+
+        // FIX-1/DS1-002: run-state snapshots are taken ONCE before the
+        // first dispatch, not per wave. Rebaselining per wave would
+        // grandfather anything planted during a wave whose scope check
+        // was bypassed (e.g. a quarantined wave). Driver-written outbox
+        // names accumulate across waves in `envelope_names` instead.
+        let outbox_baseline = dir_names(&run_dir.join("outbox"))?;
+        let root_baseline = dir_names(&run_dir)?;
+        let mut envelope_names: HashSet<String> = HashSet::new();
 
         let outcome = loop {
             // Terminal: every task reached a terminal gate verdict (pass,
@@ -371,13 +394,6 @@ impl Driver {
             }
 
             waves_run += 1;
-
-            // FIX-1 (RT2-001): snapshot driver-owned names BEFORE dispatch.
-            // The worker can only act after reading its envelope, so the
-            // race is closed by construction: anything not in these
-            // snapshots (and not driver-written this wave) is a plant.
-            let outbox_snapshot = dir_names(&run_dir.join("outbox"))?;
-            let root_snapshot = dir_names(&run_dir)?;
 
             // Dispatch every ready task.
             let mut expected: Vec<String> = Vec::new();
@@ -427,8 +443,21 @@ impl Driver {
                 git(&ws.path, &["commit", "-qm", "driver: prompt"]).map_err(|e| {
                     DriverError::Dispatch(format!("{task_id}: prompt commit: {e}"))
                 })?;
+                // FIX-5 (DS1-001): pin the baseline commit hash. The scope
+                // check diffs the worker's footprint against this hash, so
+                // a worker that commits its out-of-scope files cannot hide
+                // behind a clean `git status`.
+                let baseline = git_output(&ws.path, &["rev-parse", "HEAD"]).map_err(|e| {
+                    DriverError::Dispatch(format!("{task_id}: baseline rev-parse: {e}"))
+                })?;
+                workspace_baselines.insert(task_id.clone(), baseline);
                 let prompt_digest = rendered.digest;
 
+                // DS1-005: the contract's declared failure path is advisory —
+                // read at dispatch and recorded in the tamper-evident log.
+                // No action language exists for it, so the driver does not
+                // execute it; the driver's own failure handling applies.
+                let failure_path = contract.failure_path.clone();
                 let envelope: DispatchEnvelope = create_envelope(
                     contract,
                     prompt_digest.clone(),
@@ -441,6 +470,7 @@ impl Driver {
                 .map_err(|e| DriverError::Dispatch(format!("{task_id}: {e:?}")))?;
                 let digest = envelope.envelope_digest();
                 outbox.write_envelope(&envelope)?;
+                envelope_names.insert(format!("{digest}.json"));
 
                 log.append(
                     FabricEvent::new(
@@ -450,6 +480,7 @@ impl Driver {
                         EventPayload::Dispatch {
                             envelope_digest: digest.clone(),
                             workspace: ws.id,
+                            failure_path,
                         },
                     )
                     .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
@@ -470,6 +501,12 @@ impl Driver {
             // report — instead of aborting the run. One buggy worker cannot
             // DoS the run. The task may still be retried within its retry
             // policy; a later good receipt clears the quarantine record.
+            //
+            // FIX-5 (DS1-002/DS1-004): the quarantine path does not bypass
+            // scope enforcement, and the quarantine is a durable state
+            // transition with a chained record. Every problem appends a
+            // ReceiptRejected event; the task's workspace and the run-state
+            // snapshots are scope-checked before the gate fails.
             for problem in &problems {
                 let task_id = digest_to_task
                     .get(&problem.envelope_digest)
@@ -481,6 +518,37 @@ impl Driver {
                             problem.envelope_digest
                         ))
                     })?;
+                let attempt = attempts.get(&task_id).copied().unwrap_or(1);
+                log.append(
+                    FabricEvent::new(
+                        now_ms(),
+                        task_id.clone(),
+                        attempt,
+                        EventPayload::ReceiptRejected {
+                            cause: problem.error.clone(),
+                        },
+                    )
+                    .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
+                );
+                if let (Some(contract), Some(ws_path)) =
+                    (contracts.get(&task_id), workspace_paths.get(&task_id))
+                {
+                    // Deny events and report records are handled inside
+                    // scope_gate; the gate fails either way.
+                    let _ = scope_gate(
+                        &mut log,
+                        &mut scope_violations,
+                        &task_id,
+                        attempt,
+                        contract,
+                        ws_path,
+                        &run_dir,
+                        workspace_baselines.get(&task_id).map(|s| s.as_str()),
+                        &outbox_baseline,
+                        &root_baseline,
+                        &envelope_names,
+                    )?;
+                }
                 gates.insert(task_id.clone(), Verdict::Fail);
                 receipt_errors.insert(task_id, problem.error.clone());
             }
@@ -522,53 +590,28 @@ impl Driver {
                         (verdict, false, None)
                     }
                 };
-                // FIX-1 (RT2-001): scope enforcement, in BOTH verifier and
-                // degraded modes. The worker's footprint must stay inside
-                // the contract's allowed_scope, and nothing may appear in
-                // driver-owned run state. Any violation — or any failure
-                // to check — forces the gate to Fail; it is logged as a
-                // policy denial. Never skipped, never a pass.
-                let verdict = match enforce_scope(
+                // FIX-1 (RT2-001) + FIX-5 (DS1-001): scope enforcement, in
+                // BOTH verifier and degraded modes. The worker's footprint
+                // (committed after the pinned dispatch baseline, plus
+                // uncommitted changes) must stay inside the contract's
+                // allowed_scope, and nothing may appear in driver-owned run
+                // state. Any violation — or any failure to check — forces
+                // the gate to Fail; it is logged as a policy denial and
+                // recorded for the report. Never skipped, never a pass.
+                let scope_clean = scope_gate(
+                    &mut log,
+                    &mut scope_violations,
+                    &task_id,
+                    attempt,
                     contract,
                     ws_path,
                     &run_dir,
-                    &outbox_snapshot,
-                    &root_snapshot,
-                    &expected,
-                ) {
-                    Ok(violations) if violations.is_empty() => verdict,
-                    Ok(violations) => {
-                        log.append(
-                            FabricEvent::new(
-                                now_ms(),
-                                task_id.clone(),
-                                attempt,
-                                EventPayload::Deny {
-                                    reason: format!(
-                                        "scope violation: {}",
-                                        violations.join("; ")
-                                    ),
-                                },
-                            )
-                            .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
-                        );
-                        Verdict::Fail
-                    }
-                    Err(e) => {
-                        log.append(
-                            FabricEvent::new(
-                                now_ms(),
-                                task_id.clone(),
-                                attempt,
-                                EventPayload::Deny {
-                                    reason: format!("scope check failed closed: {e:?}"),
-                                },
-                            )
-                            .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
-                        );
-                        Verdict::Fail
-                    }
-                };
+                    workspace_baselines.get(&task_id).map(|s| s.as_str()),
+                    &outbox_baseline,
+                    &root_baseline,
+                    &envelope_names,
+                )?;
+                let verdict = if scope_clean { verdict } else { Verdict::Fail };
                 log.append(
                     FabricEvent::new(
                         now_ms(),
@@ -576,13 +619,7 @@ impl Driver {
                         attempt,
                         EventPayload::Response {
                             response_digest: receipt.file_digest.clone(),
-                            artifact_digest: receipt
-                                .body
-                                .get("artifact_digests")
-                                .and_then(|v| v.as_array())
-                                .and_then(|a| a.first())
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string()),
+                            artifact_digest: capped_artifact_digest(receipt),
                         },
                     )
                     .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
@@ -624,6 +661,7 @@ impl Driver {
                     verified: verified_flags.get(id).copied().unwrap_or(false),
                     verdict_digest: verdict_digests.get(id).cloned(),
                     receipt_error: receipt_errors.get(id).cloned(),
+                    scope_violations: scope_violations.get(id).cloned().unwrap_or_default(),
                 }
             })
             .collect();
@@ -822,6 +860,25 @@ fn git(repo: &std::path::Path, args: &[&str]) -> Result<(), DriverError> {
     Ok(())
 }
 
+/// Run git and return trimmed stdout. Fail-closed like [`git`].
+fn git_output(repo: &std::path::Path, args: &[&str]) -> Result<String, DriverError> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| DriverError::Workspace(format!("git failed to spawn: {e}")))?;
+    if !out.status.success() {
+        return Err(DriverError::Workspace(format!(
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    String::from_utf8(out.stdout)
+        .map(|s| s.trim().to_string())
+        .map_err(|e| DriverError::Workspace(format!("git output not UTF-8: {e}")))
+}
+
 // --- Receipts -------------------------------------------------------------------
 
 /// Shape-and-linkage check for one receipt. The filename<->embedded-digest
@@ -914,19 +971,43 @@ fn dir_names(dir: &Path) -> Result<HashSet<String>, DriverError> {
     Ok(set)
 }
 
-/// FIX-1 (RT2-001): enforce scope for one task attempt.
+/// DS2-002: worker-controlled receipt fields are capped before they reach
+/// the tamper-evident log. `artifact_digests[0]` is bounded only by the
+/// 8 MiB receipt cap, not by digest syntax — an 8 MiB string in every
+/// Response event would bloat `events.jsonl` and its in-memory load
+/// (the same OOM class as RT2-002). Real digests are <100 chars; anything
+/// longer is truncated at a char boundary. The full value stays in the
+/// receipt file itself for forensics.
+const MAX_EVENT_DIGEST_CHARS: usize = 256;
+
+/// The receipt's first artifact digest, truncated for the event log.
+fn capped_artifact_digest(receipt: &crate::backend::ReceiptFile) -> Option<String> {
+    receipt
+        .body
+        .get("artifact_digests")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .map(|s| s.chars().take(MAX_EVENT_DIGEST_CHARS).collect())
+}
+
+/// FIX-1 (RT2-001) + FIX-5 (DS1-001): enforce scope for one task attempt.
 ///
 /// Two layers, both fail-closed:
-/// 1. The worker's footprint inside its workspace (untracked + modified +
-///    staged, via `git status`) must lie within the contract's
-///    `allowed_scope` (T072).
+/// 1. The worker's footprint inside its workspace — paths committed after
+///    the driver's pinned dispatch `baseline` (diff baseline..HEAD) UNION
+///    uncommitted changes (`git status`) — must lie within the contract's
+///    `allowed_scope` (T072). Pinning the baseline defeats the DS1-001
+///    bypass: a worker that commits its out-of-scope files shows as a
+///    divergence from the baseline, not a clean tree. A worker commit of
+///    in-scope files is fine.
 /// 2. Nothing the driver didn't write may have appeared in the outbox or
-///    at the run_dir root since dispatch. The snapshots are taken BEFORE
-///    dispatch — the worker can only act after reading its envelope, so
-///    the race is closed by construction. This wave's envelope files are
-///    allowlisted (driver-written); `events.jsonl` and `verdicts/` are
-///    fixed driver-owned names. The inbox is the only sanctioned worker
-///    channel and is never checked.
+///    at the run_dir root since the run started. The baselines are taken
+///    ONCE before the first dispatch (DS1-002) — per-wave rebaselining
+///    would grandfather plants from bypassed waves. Driver-written
+///    envelope names accumulate across waves in `envelope_names`;
+///    `events.jsonl` and `verdicts/` are fixed driver-owned names. The
+///    inbox is the only sanctioned worker channel and is never checked.
 ///
 /// Returns human-readable violation strings (`workspace:<path>` /
 /// `outbox:<file>` / `run_state:<name>`); empty means clean. Any
@@ -936,36 +1017,33 @@ fn dir_names(dir: &Path) -> Result<HashSet<String>, DriverError> {
 /// Residual (documented, out of scope): plants deeper than one level
 /// (another wave's workspace internals, `.driver-repo` innards) are not
 /// listed here. `.driver-repo` tampering fail-closes anyway: layer 1's
-/// `git status` errors on a corrupt repo. A plant inside another task's
+/// git diff errors on a corrupt repo. A plant inside another task's
 /// workspace is caught by that task's own layer-1 check when it falls
 /// outside its allowed_scope.
 fn enforce_scope(
     contract: &TaskContract,
     ws_path: &Path,
     run_dir: &Path,
-    outbox_snapshot: &HashSet<String>,
-    root_snapshot: &HashSet<String>,
-    expected_digests: &[String],
+    baseline: &str,
+    outbox_baseline: &HashSet<String>,
+    root_baseline: &HashSet<String>,
+    envelope_names: &HashSet<String>,
 ) -> Result<Vec<String>, DriverError> {
     let mut violations = Vec::new();
 
     // Layer 1: workspace footprint vs allowed_scope.
-    let changed = workspace_changed_paths(ws_path).map_err(|e| {
+    let footprint = workspace_footprint(ws_path, baseline).map_err(|e| {
         DriverError::Workspace(format!("scope diff failed for {}: {e:?}", ws_path.display()))
     })?;
-    for p in check_scope_paths(&contract.scope, &changed) {
+    for p in check_scope_paths(&contract.scope, &footprint) {
         violations.push(format!("workspace:{p}"));
     }
 
     // Layer 2a: outbox integrity — the driver alone writes here.
-    let envelope_files: HashSet<String> = expected_digests
-        .iter()
-        .map(|d| format!("{d}.json"))
-        .collect();
     let outbox_now = dir_names(&run_dir.join("outbox"))?;
     let mut plants: Vec<String> = outbox_now
-        .difference(outbox_snapshot)
-        .filter(|n| !envelope_files.contains(*n))
+        .difference(outbox_baseline)
+        .filter(|n| !envelope_names.contains(*n))
         .cloned()
         .collect();
     plants.sort();
@@ -977,7 +1055,7 @@ fn enforce_scope(
     // wave except the event log and the verdicts dir (fixed names).
     let root_now = dir_names(run_dir)?;
     let mut drops: Vec<String> = root_now
-        .difference(root_snapshot)
+        .difference(root_baseline)
         .filter(|n| n.as_str() != "events.jsonl" && n.as_str() != "verdicts")
         .cloned()
         .collect();
@@ -987,6 +1065,82 @@ fn enforce_scope(
     }
 
     Ok(violations)
+}
+
+/// Run the scope check for one task attempt and, on any violation or
+/// check failure, append a [`EventPayload::Deny`] to the chained log and
+/// record the violations for the driver report. Returns true when the
+/// attempt is scope-clean. Shared by the receipt-gating path and the
+/// quarantine path (DS1-002) — the quarantine path does not bypass scope
+/// enforcement.
+#[allow(clippy::too_many_arguments)]
+fn scope_gate(
+    log: &mut EventLog,
+    scope_violations: &mut HashMap<TaskId, Vec<String>>,
+    task_id: &TaskId,
+    attempt: u32,
+    contract: &TaskContract,
+    ws_path: &Path,
+    run_dir: &Path,
+    baseline: Option<&str>,
+    outbox_baseline: &HashSet<String>,
+    root_baseline: &HashSet<String>,
+    envelope_names: &HashSet<String>,
+) -> Result<bool, DriverError> {
+    let checked: Result<Vec<String>, DriverError> = match baseline {
+        Some(b) => enforce_scope(
+            contract,
+            ws_path,
+            run_dir,
+            b,
+            outbox_baseline,
+            root_baseline,
+            envelope_names,
+        ),
+        None => Err(DriverError::Workspace(format!(
+            "no scope baseline recorded for {task_id}"
+        ))),
+    };
+    match checked {
+        Ok(violations) if violations.is_empty() => {
+            // Latest check wins: a clean re-check clears the record.
+            scope_violations.remove(task_id);
+            Ok(true)
+        }
+        Ok(violations) => {
+            scope_violations.insert(task_id.clone(), violations.clone());
+            log.append(
+                FabricEvent::new(
+                    now_ms(),
+                    task_id.clone(),
+                    attempt,
+                    EventPayload::Deny {
+                        reason: format!("scope violation: {}", violations.join("; ")),
+                    },
+                )
+                .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
+            );
+            Ok(false)
+        }
+        Err(e) => {
+            scope_violations.insert(
+                task_id.clone(),
+                vec![format!("scope check failed: {e:?}")],
+            );
+            log.append(
+                FabricEvent::new(
+                    now_ms(),
+                    task_id.clone(),
+                    attempt,
+                    EventPayload::Deny {
+                        reason: format!("scope check failed closed: {e:?}"),
+                    },
+                )
+                .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
+            );
+            Ok(false)
+        }
+    }
 }
 
 /// Run the registered verifiers for one task attempt and produce the
@@ -2096,7 +2250,18 @@ mod tests {
         seeder.join().unwrap();
         assert_eq!(report.outcome, WaveOutcome::Complete);
 
-        let prompt_path = run_dir.join("workspaces").join("T001-a1").join("PROMPT.md");
+        // The workspace ID carries a random suffix (DS2-003): discover the
+        // attempt-1 workspace by its deterministic `T001-a1-` prefix.
+        let ws_dir = std::fs::read_dir(run_dir.join("workspaces"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("T001-a1-"))
+            })
+            .expect("no T001-a1-* workspace");
+        let prompt_path = ws_dir.join("PROMPT.md");
         assert!(prompt_path.is_file(), "missing {prompt_path:?}");
         let text = std::fs::read_to_string(&prompt_path).unwrap();
         assert!(text.contains("## RULES"), "PROMPT.md missing compartmented RULES");
@@ -2127,6 +2292,30 @@ mod tests {
         WorkspaceStray,
         OutboxPlant,
         RunRootPlant,
+        /// DS1-001 replay: honest work + out-of-scope stray, then
+        /// `git commit` everything. The old `git status` check saw a
+        /// clean tree; the baseline-pinned diff must not.
+        CommitStray,
+        /// In-scope work only, committed. Must stay scope-clean.
+        CommitClean,
+    }
+
+    /// `git add -A && git commit` inside a test workspace. The driver
+    /// repo sets user.name/user.email, which worktrees inherit.
+    fn git_commit_test(ws_path: &std::path::Path) {
+        for args in [&["add", "-A"][..], &["commit", "-qm", "worker work"][..]] {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(ws_path)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
     }
 
     fn spawn_probe_seeder(run_dir: PathBuf, probe: ProbeKind) -> std::thread::JoinHandle<()> {
@@ -2185,6 +2374,17 @@ mod tests {
                                 .unwrap();
                             }
                             ProbeKind::Clean => {}
+                            ProbeKind::CommitStray => {
+                                std::fs::write(
+                                    ws_path.join(format!("stray-{tag}.txt")),
+                                    b"stray\n",
+                                )
+                                .unwrap();
+                                git_commit_test(&ws_path);
+                            }
+                            ProbeKind::CommitClean => {
+                                git_commit_test(&ws_path);
+                            }
                         }
                         let rp = run_dir.join("inbox").join(format!("{digest}.receipt.json"));
                         let body = serde_json::json!({
@@ -2311,6 +2511,184 @@ mod tests {
     }
 
     #[test]
+    fn scope_worker_commit_of_stray_fails_gate() {
+        // DS1-001 replay: the worker does the honest work, plants an
+        // out-of-scope file, and COMMITS both. `git status` sees a clean
+        // tree; the baseline-pinned diff must not. Gate fails, a Deny
+        // names the stray, and the report carries the violation.
+        let d = tmpdir("fix5commit");
+        let manifest = manifest_capability_predicate(&d);
+        let report = run_with_probe(&d, &manifest, ProbeKind::CommitStray, None);
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        assert!(
+            t.scope_violations.iter().any(|v| v.contains("stray-")),
+            "report must name the stray: {t:?}"
+        );
+        let denies = deny_events(&d.join("run"));
+        assert_eq!(denies.len(), 1, "{denies:?}");
+        assert!(denies[0].contains("workspace:stray-"), "{denies:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn scope_worker_commit_of_in_scope_only_passes() {
+        // A worker commit of in-scope files is fine: the diff against the
+        // pinned baseline shows only allowed paths.
+        let d = tmpdir("fix5commitclean");
+        let manifest = manifest_capability_predicate(&d);
+        let report = run_with_probe(&d, &manifest, ProbeKind::CommitClean, None);
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "pass", "{t:?}");
+        assert!(t.scope_violations.is_empty(), "{t:?}");
+        assert!(deny_events(&d.join("run")).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Single task, allowed_scope ["out.txt"], retryable. For quarantine +
+    /// scope interaction tests (degraded mode).
+    fn manifest_scope_retry(dir: &std::path::Path, max_attempts: u32) -> PathBuf {
+        let m = serde_json::json!({ "leaf_tasks": [
+            {
+                "stable_id": "T001", "objective": "write out.txt",
+                "versioned_spec_reference": "r",
+                "allowed_scope": ["out.txt"], "inputs": ["i"], "outputs": ["out.txt"],
+                "dependencies": [], "acceptance_predicates": ["file-exists:out.txt"],
+                "verifier_ids": ["v"], "max_attempts": max_attempts,
+            },
+        ]});
+        let p = dir.join("manifest.json");
+        std::fs::write(&p, serde_json::to_vec(&m).unwrap()).unwrap();
+        p
+    }
+
+    /// DS1-002 replay: the first envelope answered gets a run-root plant +
+    /// a corrupt receipt (quarantine); the second gets honest work + a
+    /// valid receipt. The wave-1 plant must NOT be grandfathered into the
+    /// wave-2 baseline (snapshots are taken once, not per wave).
+    fn spawn_quarantine_scope_seeder(run_dir: PathBuf) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            let mut seen: Vec<String> = Vec::new();
+            loop {
+                let outbox = run_dir.join("outbox");
+                if outbox.is_dir() {
+                    for entry in std::fs::read_dir(&outbox).unwrap() {
+                        let entry = entry.unwrap();
+                        let name = entry.file_name().to_str().unwrap().to_string();
+                        if !name.ends_with(".json") || name.ends_with(".receipt.json") {
+                            continue;
+                        }
+                        let digest = name.trim_end_matches(".json").to_string();
+                        if seen.contains(&digest) {
+                            continue;
+                        }
+                        seen.push(digest.clone());
+                        let rp =
+                            run_dir.join("inbox").join(format!("{digest}.receipt.json"));
+                        if seen.len() == 1 {
+                            // Wave 1: plant at the run root, corrupt receipt.
+                            std::fs::write(run_dir.join("evil-q.txt"), b"evil\n").unwrap();
+                            write_atomic_test(&rp, b"{{{ not json");
+                        } else {
+                            // Wave 2: honest work, valid receipt.
+                            let env: serde_json::Value = serde_json::from_slice(
+                                &std::fs::read(entry.path()).unwrap(),
+                            )
+                            .unwrap();
+                            let ws_id = env["workspace"].as_str().unwrap();
+                            let ws_path = run_dir.join("workspaces").join(ws_id);
+                            for _ in 0..100 {
+                                if ws_path.is_dir() {
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(20));
+                            }
+                            std::fs::write(ws_path.join("out.txt"), b"done\n").unwrap();
+                            let body = serde_json::json!({
+                                "envelope_digest": digest,
+                                "verdict": "pass",
+                            });
+                            write_atomic_test(&rp, &serde_json::to_vec(&body).unwrap());
+                        }
+                    }
+                }
+                if std::time::Instant::now() > deadline || run_dir.join("DONE").exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        })
+    }
+
+    #[test]
+    fn quarantine_logs_rejection_and_scope_checks_plant() {
+        // DS1-002 + DS1-004: wave 1 plants a run-root file and sends a
+        // corrupt receipt → quarantine (gate fail) WITH a chained
+        // ReceiptRejected event and a scope check. Wave 2 is honest, but
+        // the wave-1 plant is not grandfathered: the wave-2 scope check
+        // flags it because snapshots are taken once, not per wave.
+        let d = tmpdir("fix5quar");
+        let manifest = manifest_scope_retry(&d, 2);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.max_waves = 3;
+        let driver = Driver::new(cfg).unwrap();
+        let run_dir = d.join("run");
+        let seeder = spawn_quarantine_scope_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        assert!(
+            t.scope_violations
+                .iter()
+                .any(|v| v == "run_state:evil-q.txt"),
+            "wave-2 check must flag the wave-1 plant: {t:?}"
+        );
+        let log = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+        assert!(
+            log.contains("\"op\":\"RECEIPT_REJECTED\""),
+            "missing chained quarantine record"
+        );
+        let denies = deny_events(&run_dir);
+        assert!(
+            denies.iter().any(|e| e.contains("run_state:evil-q.txt")),
+            "{denies:?}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn artifact_digest_capped_for_event_log() {
+        // DS2-002: an overlong worker-controlled digest is truncated
+        // before the event log; a normal digest passes through intact.
+        let body = |d: &str| crate::backend::ReceiptFile {
+            path: PathBuf::from("r.json"),
+            envelope_digest: "sha256:abc".to_string(),
+            body: serde_json::json!({ "artifact_digests": [d] }),
+            file_digest: "sha256:def".to_string(),
+        };
+        let normal = "sha256:".to_string() + &"ab".repeat(32);
+        assert_eq!(
+            capped_artifact_digest(&body(&normal)).as_deref(),
+            Some(normal.as_str())
+        );
+        let long = "x".repeat(10_000);
+        let capped = capped_artifact_digest(&body(&long)).unwrap();
+        assert_eq!(capped.len(), MAX_EVENT_DIGEST_CHARS);
+        assert!(capped_artifact_digest(&body("")).is_some());
+        let none = crate::backend::ReceiptFile {
+            path: PathBuf::from("r.json"),
+            envelope_digest: "sha256:abc".to_string(),
+            body: serde_json::json!({}),
+            file_digest: "sha256:def".to_string(),
+        };
+        assert!(capped_artifact_digest(&none).is_none());
+    }
+
+    #[test]
     fn enforce_scope_git_failure_is_fail_closed() {
         // The diff cannot run (not a git repo) → Err, and the caller must
         // treat it as gate fail, never skip.
@@ -2318,8 +2696,16 @@ mod tests {
         let ws = d.join("ws");
         std::fs::create_dir_all(&ws).unwrap();
         let contract = test_contract();
-        let err = enforce_scope(&contract, &ws, &d, &HashSet::new(), &HashSet::new(), &[])
-            .unwrap_err();
+        let err = enforce_scope(
+            &contract,
+            &ws,
+            &d,
+            "deadbeef",
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DriverError::Workspace(_)),
             "expected Workspace error, got {err:?}"

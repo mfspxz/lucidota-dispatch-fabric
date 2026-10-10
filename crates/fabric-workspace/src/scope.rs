@@ -144,6 +144,94 @@ pub fn workspace_changed_paths(workspace: &Path) -> Result<Vec<String>> {
     parse_porcelain(&text)
 }
 
+/// Parse `git diff --name-status <baseline> HEAD` output into
+/// workspace-relative paths. Lines are `<status>\t<path>`; renames and
+/// copies (`R100`, `C100`) carry `old\tnew` and yield the destination.
+/// Paths are C-unquoted the same way porcelain paths are.
+fn parse_name_status(text: &str) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\t');
+        let status = parts.next().ok_or_else(|| {
+            FabricError::VerificationFailure(format!(
+                "scope diff: unparseable name-status line {line:?}"
+            ))
+        })?;
+        let first = parts.next().ok_or_else(|| {
+            FabricError::VerificationFailure(format!(
+                "scope diff: name-status line has no path: {line:?}"
+            ))
+        })?;
+        let raw = if status.starts_with('R') || status.starts_with('C') {
+            parts.next().ok_or_else(|| {
+                FabricError::VerificationFailure(format!(
+                    "scope diff: rename line has no destination: {line:?}"
+                ))
+            })?
+        } else {
+            first
+        };
+        paths.push(unquote_field(raw)?);
+    }
+    Ok(paths)
+}
+
+/// Undo git's C-style quoting on one name-status field, when quoted.
+fn unquote_field(field: &str) -> Result<String> {
+    let field = field.trim();
+    match field
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+    {
+        Some(inner) => unquote_c(inner),
+        None => Ok(field.to_string()),
+    }
+}
+
+/// List paths committed after `baseline`: `git diff --name-status
+/// <baseline> HEAD`. Catches a worker that commits its out-of-scope files
+/// — `git status` alone would see a clean tree (DS1-001). Fail-closed on
+/// any git failure or unparseable output.
+pub fn workspace_committed_paths(workspace: &Path, baseline: &str) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["diff", "--name-status", baseline, "HEAD", "--"])
+        .output()
+        .map_err(|e| {
+            FabricError::VerificationFailure(format!(
+                "scope diff: git diff failed to spawn for {}: {e}",
+                workspace.display()
+            ))
+        })?;
+    if !out.status.success() {
+        return Err(FabricError::VerificationFailure(format!(
+            "scope diff: git diff failed for {}: {}",
+            workspace.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let text = String::from_utf8(out.stdout).map_err(|e| {
+        FabricError::VerificationFailure(format!("scope diff: git diff output not UTF-8: {e}"))
+    })?;
+    parse_name_status(&text)
+}
+
+/// The worker's full footprint inside the workspace: paths committed after
+/// the driver's pinned dispatch `baseline` (diff baseline..HEAD) UNION
+/// uncommitted changes (`git status`). A worker commit of in-scope files
+/// is fine — it is still checked against `allowed_scope`. Sorted and
+/// deduplicated. Fail-closed on any git failure.
+pub fn workspace_footprint(workspace: &Path, baseline: &str) -> Result<Vec<String>> {
+    let mut paths = workspace_committed_paths(workspace, baseline)?;
+    paths.extend(workspace_changed_paths(workspace)?);
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
 /// Parse `git status --porcelain=v1` output into workspace-relative paths.
 /// Rename/copy entries (`R  old -> new`, quoted or bare) yield the
 /// destination path.
@@ -500,5 +588,114 @@ mod tests {
         // Malformed line is fail-closed.
         assert!(parse_porcelain("XY\n").is_err());
         assert!(parse_porcelain("?? \"unterminated\n").is_err());
+    }
+
+    // --- workspace_footprint (FIX-5 / DS1-001) ---
+
+    #[test]
+    fn name_status_parser_unit_cases() {
+        // Added / modified / deleted.
+        assert_eq!(
+            parse_name_status("A\tnew.txt\nM\tmod.txt\nD\tdel.txt\n").unwrap(),
+            vec!["new.txt", "mod.txt", "del.txt"]
+        );
+        // Rename yields the destination.
+        assert_eq!(
+            parse_name_status("R100\told.txt\tnew.txt\n").unwrap(),
+            vec!["new.txt"]
+        );
+        // Quoted rename destination is unquoted.
+        assert_eq!(
+            parse_name_status("R100\told.txt\t\"new name.txt\"\n").unwrap(),
+            vec!["new name.txt"]
+        );
+        // Empty diff is an empty footprint, not an error.
+        assert_eq!(parse_name_status("").unwrap(), Vec::<String>::new());
+        // Malformed lines are fail-closed.
+        assert!(parse_name_status("A\n").is_err());
+        assert!(parse_name_status("R100\tonly-old\n").is_err());
+    }
+
+    #[test]
+    fn footprint_catches_worker_commit() {
+        // DS1-001 replay: the worker commits its files; `git status` is
+        // clean but the diff against the pinned baseline is not.
+        let dir = temp_git_repo("footprint");
+        let baseline = git_rev(&dir, "HEAD");
+        // Worker writes an in-scope file and an out-of-scope file, then
+        // commits both — the exact bypass DS1 demonstrated.
+        std::fs::write(dir.join("out.txt"), b"work\n").unwrap();
+        std::fs::write(dir.join("EVIL.txt"), b"evil\n").unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "hide"]);
+
+        // `git status` sees nothing — the old check would pass.
+        assert_eq!(workspace_changed_paths(&dir).unwrap(), Vec::<String>::new());
+        // The baseline-pinned footprint sees the commit.
+        let mut fp = workspace_footprint(&dir, &baseline).unwrap();
+        fp.sort();
+        assert_eq!(fp, vec!["EVIL.txt", "out.txt"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn footprint_unions_committed_and_uncommitted() {
+        let dir = temp_git_repo("footunion");
+        let baseline = git_rev(&dir, "HEAD");
+        // Committed change.
+        std::fs::write(dir.join("committed.txt"), b"c\n").unwrap();
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["add", "-A"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["commit", "-q", "-m", "w"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        // Uncommitted change after the commit.
+        std::fs::write(dir.join("dirty.txt"), b"d\n").unwrap();
+
+        let mut fp = workspace_footprint(&dir, &baseline).unwrap();
+        fp.sort();
+        assert_eq!(fp, vec!["committed.txt", "dirty.txt"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn footprint_bad_baseline_is_error() {
+        // An unknown baseline hash is fail-closed, never an empty list.
+        let dir = temp_git_repo("footbad");
+        let err = workspace_footprint(&dir, "deadbeef").unwrap_err();
+        assert!(
+            matches!(err, FabricError::VerificationFailure(_)),
+            "expected VerificationFailure, got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn git_rev(dir: &std::path::Path, rev: &str) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["rev-parse", rev])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
     }
 }
