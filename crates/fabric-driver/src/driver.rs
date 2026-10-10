@@ -42,7 +42,7 @@ use crate::config::DriverConfig;
 use fabric_dispatch::envelope::{create_envelope, DispatchEnvelope, EnvelopeLimits};
 use fabric_graph::ready::{ready_tasks, GateVerdicts};
 use fabric_graph::{DepEdge, EdgeKind, TaskGraph, TaskNode};
-use fabric_records::chain::EventLog;
+use fabric_records::chain::{EventLog, EventRecord};
 use fabric_records::events::{EventPayload, FabricEvent};
 use fabric_records::store::digest_bytes;
 use fabric_types::{
@@ -252,7 +252,7 @@ impl Driver {
         };
         let output_schema = serde_json::json!({"type": "object"});
 
-        let mut log = EventLog::new();
+        let mut log = load_event_log(&run_dir)?;
         let mut gates: GateVerdicts = HashMap::new();
         let mut attempts: HashMap<TaskId, u32> = HashMap::new();
         let mut waves_waited: HashMap<TaskId, u32> = HashMap::new();
@@ -830,6 +830,11 @@ fn write_verdict_receipt(
 // --- Events ---------------------------------------------------------------------
 
 fn persist_events(run_dir: &std::path::Path, log: &EventLog) -> Result<(), DriverError> {
+    // Never persist a broken chain: fail closed rather than cementing a
+    // tampered or corrupted log to disk.
+    log.verify().map_err(|e| {
+        DriverError::Record(format!("refusing to persist broken event chain: {e:?}"))
+    })?;
     let path = run_dir.join("events.jsonl");
     let mut out = String::new();
     for record in log.records() {
@@ -838,9 +843,59 @@ fn persist_events(run_dir: &std::path::Path, log: &EventLog) -> Result<(), Drive
         out.push_str(&line);
         out.push('\n');
     }
-    std::fs::write(&path, out)
-        .map_err(|e| DriverError::Record(format!("cannot write {}: {e}", path.display())))?;
+    // Atomic: tmp + rename. A crash leaves either the old log or the new
+    // log, never a torn one — same protocol as verdict receipts.
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, &out)
+        .map_err(|e| DriverError::Record(format!("cannot write {}: {e}", tmp.display())))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| DriverError::Record(format!("cannot publish {}: {e}", path.display())))?;
     Ok(())
+}
+
+/// Load a previously persisted event log, verifying its hash chain.
+///
+/// Missing file → fresh empty log (first run into this directory). Present
+/// file → every line must parse as an `EventRecord` and the chain must
+/// verify; anything else is a typed, fail-closed error naming the file.
+///
+/// This is the choke point for RT3-001: `EventLog::verify()` previously had
+/// zero production callers, so a tampered `events.jsonl` was undetectable.
+/// Every run now passes through here before its first append.
+///
+/// Trust statement: the chain detects tampering of recorded events after the
+/// fact; it does not authenticate the writer. The dead-drop inbox is a known
+/// limitation here — anyone who could write the log could also have
+/// recomputed a valid chain. The chain is a tripwire against silent
+/// alteration, not proof of authorship.
+fn load_event_log(run_dir: &std::path::Path) -> Result<EventLog, DriverError> {
+    let path = run_dir.join("events.jsonl");
+    if !path.exists() {
+        return Ok(EventLog::new());
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| DriverError::Record(format!("cannot read {}: {e}", path.display())))?;
+    let mut records = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let record: EventRecord = serde_json::from_str(line).map_err(|e| {
+            DriverError::Record(format!(
+                "{} line {}: unparsable event record: {e}",
+                path.display(),
+                i + 1
+            ))
+        })?;
+        records.push(record);
+    }
+    EventLog::from_records(records).map_err(|e| {
+        DriverError::Record(format!(
+            "{}: event chain verification failed (log was altered): {e:?}",
+            path.display()
+        ))
+    })
 }
 
 fn now_ms() -> u64 {
@@ -1433,6 +1488,140 @@ mod tests {
         std::fs::write(&manifest, serde_json::to_vec(&m).unwrap()).unwrap();
         let driver = Driver::new(config_for(&d, &manifest)).unwrap();
         assert!(matches!(driver.run(), Err(DriverError::Manifest(_))));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // --- Event-log repair tests (FIX-2) -------------------------------------
+
+    fn fix2_event(ts: u64) -> FabricEvent {
+        FabricEvent::new(
+            ts,
+            TaskId::new("T001").unwrap(),
+            1,
+            EventPayload::Release {
+                reason: "fix2".to_string(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn fix2_log(n: u64) -> EventLog {
+        let mut log = EventLog::new();
+        for i in 0..n {
+            log.append(fix2_event(i + 1));
+        }
+        log
+    }
+
+    #[test]
+    fn tampered_event_file_fails_load_with_typed_error() {
+        let d = tmpdir("evtamper");
+        let run_dir = d.join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        persist_events(&run_dir, &fix2_log(3)).unwrap();
+
+        // Flip one byte in the middle of the file.
+        let path = run_dir.join("events.jsonl");
+        let mut bytes = std::fs::read(&path).unwrap();
+        let mid = bytes.len() / 2;
+        bytes[mid] ^= 0x01;
+        std::fs::write(&path, &bytes).unwrap();
+
+        let err = load_event_log(&run_dir).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            matches!(err, DriverError::Record(_)),
+            "expected typed Record error, got: {msg}"
+        );
+        assert!(msg.contains("events.jsonl"), "error must name the file: {msg}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn valid_event_chain_loads_and_verifies() {
+        let d = tmpdir("evload");
+        let run_dir = d.join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let log = fix2_log(3);
+        let head = log.head_hash();
+        persist_events(&run_dir, &log).unwrap();
+
+        let loaded = load_event_log(&run_dir).unwrap();
+        assert_eq!(loaded.records().len(), 3);
+        assert_eq!(loaded.head_hash(), head);
+        // Appends continue the chain at the right seq.
+        let mut loaded = loaded;
+        let r = loaded.append(fix2_event(4));
+        assert_eq!(r.seq, 3);
+        assert!(loaded.verify().is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn missing_event_file_loads_as_empty_log() {
+        let d = tmpdir("evmissing");
+        let run_dir = d.join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let loaded = load_event_log(&run_dir).unwrap();
+        assert_eq!(loaded.records().len(), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn persist_crash_simulation_leaves_old_log_intact() {
+        let d = tmpdir("evcrash");
+        let run_dir = d.join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        persist_events(&run_dir, &fix2_log(2)).unwrap();
+        let old_bytes = std::fs::read(run_dir.join("events.jsonl")).unwrap();
+
+        // Simulate a crash mid-write: a tmp file exists, the rename never
+        // happened. The published log must be untouched.
+        std::fs::write(run_dir.join("events.tmp"), b"{\"torn\": true}\n").unwrap();
+        assert_eq!(std::fs::read(run_dir.join("events.jsonl")).unwrap(), old_bytes);
+        // The stale tmp does not confuse the loader.
+        assert_eq!(load_event_log(&run_dir).unwrap().records().len(), 2);
+
+        // The next persist completes atomically: torn tmp is replaced, no
+        // torn log is ever visible.
+        persist_events(&run_dir, &fix2_log(5)).unwrap();
+        assert!(!run_dir.join("events.tmp").exists());
+        let loaded = load_event_log(&run_dir).unwrap();
+        assert_eq!(loaded.records().len(), 5);
+        assert!(loaded.verify().is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn run_rejects_tampered_prior_event_log() {
+        let d = tmpdir("evrun");
+        let manifest = manifest_two_tasks(&d);
+        let driver = Driver::new(config_for(&d, &manifest)).unwrap();
+
+        // First run: honest seeder, produces a valid events.jsonl.
+        let run_dir = d.join("run");
+        let seeder = spawn_pass_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        assert_eq!(report.outcome, WaveOutcome::Complete);
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+        assert!(run_dir.join("events.jsonl").is_file());
+
+        // Tamper with the persisted log, then run again into the same dir.
+        let path = run_dir.join("events.jsonl");
+        let mut bytes = std::fs::read(&path).unwrap();
+        let mid = bytes.len() / 2;
+        bytes[mid] ^= 0x01;
+        std::fs::write(&path, &bytes).unwrap();
+
+        let driver2 = Driver::new(config_for(&d, &manifest)).unwrap();
+        let err = driver2.run().unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            matches!(err, DriverError::Record(_)),
+            "expected typed Record error, got: {msg}"
+        );
+        assert!(msg.contains("events.jsonl"), "error must name the file: {msg}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
