@@ -208,13 +208,17 @@ mod tests {
 
     #[tokio::test]
     async fn primary_failure_still_allows_hedge_success() {
+        // Wide margins (500/700/50): under parallel-suite load the executor
+        // can be starved, and tokio's biased select would take a ready primary
+        // over a late hedge-delay. 500ms keeps the intended interleaving even
+        // when timers fire late.
         let r = race_primary_hedge(
             async {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 Err::<i32, &str>("primary boom")
             },
             async {
-                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(700)).await;
                 Ok::<i32, &str>(7)
             },
             50,

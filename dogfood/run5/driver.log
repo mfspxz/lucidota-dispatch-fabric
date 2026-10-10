@@ -1,0 +1,45 @@
+{
+  "outcome": {
+    "Stalled": {
+      "reason": "2 task(s) un-gated, none ready: DOG-B blocked by [DOG-A]; DOG-C blocked by [DOG-B]"
+    }
+  },
+  "waves_run": 2,
+  "tasks": [
+    {
+      "task_id": "DOG-A",
+      "waves_waited": 1,
+      "gate": "fail",
+      "receipt_digest": "sha256:3b4bd2fefc848604530130b09a97fd876224c6d78bd24d02ef9a6cf3ce006314",
+      "verified": true,
+      "verdict_digest": "fnv1a64:c2c6954e1409c500",
+      "receipt_error": null,
+      "scope_violations": [
+        "workspace:stray.txt",
+        "run_state:root-stray.txt"
+      ]
+    },
+    {
+      "task_id": "DOG-B",
+      "waves_waited": 3,
+      "gate": "unstarted",
+      "receipt_digest": null,
+      "verified": false,
+      "verdict_digest": null,
+      "receipt_error": null,
+      "scope_violations": []
+    },
+    {
+      "task_id": "DOG-C",
+      "waves_waited": 3,
+      "gate": "unstarted",
+      "receipt_digest": null,
+      "verified": false,
+      "verdict_digest": null,
+      "receipt_error": null,
+      "scope_violations": []
+    }
+  ],
+  "run_dir": "dogfood/run5",
+  "verification_degraded": false
+}

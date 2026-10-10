@@ -1,0 +1,38 @@
+{
+  "outcome": "Complete",
+  "waves_run": 3,
+  "tasks": [
+    {
+      "task_id": "DOG-A",
+      "waves_waited": 1,
+      "gate": "pass",
+      "receipt_digest": "sha256:38612f6e8c7796b17e1a199cccc70cb918f72075804068aa30b8c6207d0ea1c0",
+      "verified": true,
+      "verdict_digest": "fnv1a64:c2c6954e1409c500",
+      "receipt_error": null,
+      "scope_violations": []
+    },
+    {
+      "task_id": "DOG-B",
+      "waves_waited": 2,
+      "gate": "pass",
+      "receipt_digest": "sha256:f7dde3e2164909e1e24118dce4a65ff3071bf43ff3611057087be8845d93125f",
+      "verified": true,
+      "verdict_digest": "fnv1a64:4ad6a3d166c1e0e1",
+      "receipt_error": null,
+      "scope_violations": []
+    },
+    {
+      "task_id": "DOG-C",
+      "waves_waited": 3,
+      "gate": "pass",
+      "receipt_digest": "sha256:e139e1b2edab522f373bb62da4c6679490d216329bed238d8a2e14c2ff73f0c8",
+      "verified": true,
+      "verdict_digest": "fnv1a64:3853ce8e2a27563e",
+      "receipt_error": null,
+      "scope_violations": []
+    }
+  ],
+  "run_dir": "dogfood/run5b",
+  "verification_degraded": false
+}
