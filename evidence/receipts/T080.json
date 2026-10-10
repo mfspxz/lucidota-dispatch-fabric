@@ -1,0 +1,10 @@
+{
+  "task_id": "T080",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test (isolated harness rec1-harness)", "cargo clippy --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:bb2d1832552f76d6b781d5ce07c831f200cd121378d3f302650747561a63090a"],
+  "notes": "capture_provenance records HEAD, dirty state, sorted dirty files, sha256 diff digest, submodule states, cargo/rustc/git versions; read-only, dirty state reported never cleaned, non-fatal errors recorded not raised. Own tests caught a trim() bug eating porcelain's leading space; fixed to trim_end. 7 tests green."
+}
