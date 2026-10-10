@@ -19,12 +19,10 @@
 //! Append-only semantics: the update path is load → register → save. There
 //! is no in-place mutation of the file.
 //!
-//! INTEGRATOR NOTE: reuses the `OrganelleRecord` stand-in from `compose.rs`
-//! (see its docs); replace with `crate::record::OrganelleRecord` at
 //! integration. Both functions take/return plain record vecs so they work
 //! with `registry.all()` directly.
 
-use crate::compose::OrganelleRecord;
+use crate::record::OrganelleRecord;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -131,7 +129,7 @@ fn is_well_formed_digest(d: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compose::OrganelleRecord;
+    use crate::record::OrganelleRecord;
     use organelle_core::{Layer, MutationClass, TypeRef};
 
     fn sample_records() -> Vec<OrganelleRecord> {

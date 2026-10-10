@@ -6,38 +6,16 @@
 //! same wire-time rule as `organelle_core::Composed::wire`: exact `TypeRef`
 //! equality, checked at plan time (never at run time).
 //!
-//! INTEGRATOR NOTE (stand-in): the real `OrganelleRecord` lives in
-//! `record.rs` (cell ORG1's scope) and does not exist in this snapshot, so
-//! this module defines a minimal stand-in with exactly the fields the frozen
-//! shape promises (name, version, layer, mutation_class, inputs, outputs,
-//! interface_digest, artifact_digest, source). The planner takes
-//! `&[OrganelleRecord]` — at integration, pass `registry.all()` and replace
-//! this stand-in with `crate::record::OrganelleRecord`; the field shapes are
-//! identical, so no other code changes are needed. `persist.rs` reuses this
-//! stand-in via `crate::compose::OrganelleRecord`.
+//! The planner takes `&[crate::record::OrganelleRecord]` — at the call site,
+//! pass `registry.all()`.
 //!
 //! Unknown is a valid outcome: `plan_composition` returns `None` when no
 //! chain exists within the depth bound. It never invents a chain — every
 //! returned plan passes `verify_plan`.
 
-use organelle_core::{Layer, MutationClass, TypeRef};
-use serde::{Deserialize, Serialize};
+use crate::record::OrganelleRecord;
+use organelle_core::{MutationClass, TypeRef};
 use std::collections::VecDeque;
-
-/// Minimal stand-in for `crate::record::OrganelleRecord` (see module docs).
-/// Field-for-field identical to the promised frozen shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OrganelleRecord {
-    pub name: String,
-    pub version: String,
-    pub layer: Layer,
-    pub mutation_class: MutationClass,
-    pub inputs: Vec<TypeRef>,
-    pub outputs: Vec<TypeRef>,
-    pub interface_digest: String,
-    pub artifact_digest: String,
-    pub source: String,
-}
 
 /// Sentinel `from_member` value in `CompositionPlan::wiring`: the input is
 /// satisfied directly by an available input rather than by a chain member.
