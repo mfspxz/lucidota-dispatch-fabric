@@ -1,0 +1,10 @@
+{
+  "task_id": "T083",
+  "attempt": 1,
+  "verdict": "PASS",
+  "provider": "direct",
+  "commands": ["cargo test -p fabric-records", "cargo clippy -p fabric-records --all-targets"],
+  "exit_codes": [0, 0],
+  "artifact_digests": ["sha256:57abf3944594b4467693163d5c83423e27ce0dbf04179c2cc225770957c52bcd"],
+  "notes": "hash-chained event log with monotonic seq, tamper detection, documented detection-not-prevention"
+}
