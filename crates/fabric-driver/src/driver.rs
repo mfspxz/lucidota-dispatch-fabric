@@ -19,6 +19,23 @@
 //! Worker DRV1: replace the `todo!()` bodies with production implementations.
 //! Public signatures are frozen; add private helpers freely. The dead-drop
 //! protocol (outbox/inbox file layout) lives in `backend.rs` (your file).
+//!
+//! DRV-04 (cell DRV2): verifier wiring. When `DriverConfig::verifiers_path`
+//! is `Some`, the driver loads `Vec<VerifierRegistration>` at startup
+//! (malformed file = `InvalidConfig`, fail-closed) and gates each task on a
+//! real verifier VERDICT: after collecting a wave's receipts it looks up
+//! verifiers for the task's class + each acceptance predicate's capability,
+//! executes them bounded against the task's workspace, evaluates predicates
+//! with `fabric_verify::predicates::evaluate`, and finalizes a
+//! `VerdictBuilder`. Gate = pass only if the verdict passes. When
+//! `verifiers_path` is `None` the driver keeps the degraded behavior
+//! (receipt shape + digest linkage only) and records the degradation in the
+//! report.
+//!
+//! DRV-05 (cell DRV2): `TaskOutcome` carries `verified: bool` and
+//! `verdict_digest: Option<String>`; `DriverReport` carries
+//! `verification_degraded: bool`. Verifier-mode verdict receipts are written
+//! to `<run_dir>/verdicts/<task>-a<attempt>.json`.
 
 use crate::backend::{Inbox, Outbox};
 use crate::config::DriverConfig;
@@ -31,6 +48,12 @@ use fabric_records::store::digest_bytes;
 use fabric_types::{
     AcceptancePredicate, EndpointId, FabricError, Scope, TaskClass, TaskContract, TaskId, Verdict,
 };
+use fabric_verify::exec::{execute, ExecConfig, ExecOutcome};
+use fabric_verify::predicates::{
+    evaluate, AcceptancePredicate as VerifyPredicate, EvidenceLink, OnMissing, PredicateOutcome,
+};
+use fabric_verify::registry::{VerifierCapability, VerifierRegistration, VerifierRegistry};
+use fabric_verify::verdict::{PredicateVerdict, VerdictBuilder};
 use fabric_workspace::workspace::{create_workspace, WorkspaceConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -86,6 +109,12 @@ pub struct TaskOutcome {
     /// or from the graph state.
     pub gate: String,
     pub receipt_digest: Option<String>,
+    /// True when registered verifiers ran and the gate reflects their
+    /// verdict. False in degraded mode (receipt shape + linkage only).
+    pub verified: bool,
+    /// The `VerdictReceipt.receipt_digest` when `verified`; None when
+    /// degraded.
+    pub verdict_digest: Option<String>,
 }
 
 /// DRV-01: what `run()` returns.
@@ -96,6 +125,9 @@ pub struct DriverReport {
     pub tasks: Vec<TaskOutcome>,
     /// Path to the run's record directory (events, receipts, workspaces).
     pub run_dir: PathBuf,
+    /// True when `verifiers_path` was `None`: gates came from receipt claims
+    /// (shape + digest linkage), not from verifier verdicts.
+    pub verification_degraded: bool,
 }
 
 // --- Manifest ---------------------------------------------------------------
@@ -132,6 +164,9 @@ struct LeafTask {
 /// DRV-01: the self-hosting driver.
 pub struct Driver {
     config: DriverConfig,
+    /// Loaded verifier registry when `verifiers_path` was `Some`.
+    /// `None` = degraded mode (receipt shape + linkage only).
+    verifiers: Option<VerifierRegistry>,
 }
 
 impl Driver {
@@ -175,7 +210,11 @@ impl Driver {
                 "max_waves must be >= 1".to_string(),
             ));
         }
-        Ok(Self { config })
+        let verifiers = match &config.verifiers_path {
+            Some(path) => Some(load_verifiers(path)?),
+            None => None,
+        };
+        Ok(Self { config, verifiers })
     }
 
     /// Run the build loop to a terminal outcome.
@@ -222,7 +261,11 @@ impl Driver {
         let mut attempts: HashMap<TaskId, u32> = HashMap::new();
         let mut waves_waited: HashMap<TaskId, u32> = HashMap::new();
         let mut receipt_digests: HashMap<TaskId, String> = HashMap::new();
+        let mut workspace_paths: HashMap<TaskId, PathBuf> = HashMap::new();
+        let mut verified_flags: HashMap<TaskId, bool> = HashMap::new();
+        let mut verdict_digests: HashMap<TaskId, String> = HashMap::new();
         let mut waves_run: u32 = 0;
+        let verification_degraded = self.verifiers.is_none();
 
         let outcome = loop {
             // Terminal: every task has a gate verdict.
@@ -260,6 +303,7 @@ impl Driver {
 
                 let ws = create_workspace(&ws_config, &base_commit, task_id, attempt)
                     .map_err(|e| DriverError::Workspace(format!("{task_id}: {e:?}")))?;
+                workspace_paths.insert(task_id.clone(), ws.path.clone());
 
                 let contract = contracts
                     .get(task_id)
@@ -304,9 +348,10 @@ impl Driver {
                 break WaveOutcome::WaveTimeout;
             }
 
-            // Verify shape + linkage only; deep verification is the
-            // verifier's job. A receipt that parses and names a known
-            // envelope digest gates its task with the receipt's verdict.
+            // Gate each receipt. Degraded mode: shape + linkage only, the
+            // gate follows the receipt's claimed verdict. Verifier mode: the
+            // receipt's claim is ignored and the gate follows the verifiers'
+            // verdict over the task's workspace.
             for receipt in &receipts {
                 let task_id = digest_to_task
                     .get(&receipt.envelope_digest)
@@ -318,12 +363,33 @@ impl Driver {
                             receipt.envelope_digest
                         ))
                     })?;
-                let verdict = parse_receipt_verdict(receipt)?;
+                let attempt = attempts.get(&task_id).copied().unwrap_or(1);
+                let (verdict, verified, verdict_digest) = match &self.verifiers {
+                    Some(registry) => {
+                        let contract = contracts.get(&task_id).ok_or_else(|| {
+                            DriverError::Graph(format!("no contract for {task_id}"))
+                        })?;
+                        let ws_path = workspace_paths.get(&task_id).ok_or_else(|| {
+                            DriverError::Workspace(format!("no workspace path for {task_id}"))
+                        })?;
+                        let vr = verify_with_verifiers(registry, contract, ws_path)?;
+                        write_verdict_receipt(&run_dir, &task_id, attempt, &vr)?;
+                        (
+                            vr.overall,
+                            true,
+                            Some(vr.receipt_digest.clone()),
+                        )
+                    }
+                    None => {
+                        let verdict = parse_receipt_verdict(receipt)?;
+                        (verdict, false, None)
+                    }
+                };
                 log.append(
                     FabricEvent::new(
                         now_ms(),
                         task_id.clone(),
-                        attempts.get(&task_id).copied().unwrap_or(1),
+                        attempt,
                         EventPayload::Response {
                             response_digest: receipt.file_digest.clone(),
                             artifact_digest: receipt
@@ -341,12 +407,16 @@ impl Driver {
                     FabricEvent::new(
                         now_ms(),
                         task_id.clone(),
-                        attempts.get(&task_id).copied().unwrap_or(1),
+                        attempt,
                         EventPayload::Verify { verdict },
                     )
                     .map_err(|e| DriverError::Record(format!("event: {e:?}")))?,
                 );
                 receipt_digests.insert(task_id.clone(), receipt.file_digest.clone());
+                verified_flags.insert(task_id.clone(), verified);
+                if let Some(d) = verdict_digest {
+                    verdict_digests.insert(task_id.clone(), d);
+                }
                 gates.insert(task_id, verdict);
             }
             persist_events(&run_dir, &log)?;
@@ -366,6 +436,8 @@ impl Driver {
                     waves_waited: waves_waited.get(id).copied().unwrap_or(0),
                     gate,
                     receipt_digest: receipt_digests.get(id).cloned(),
+                    verified: verified_flags.get(id).copied().unwrap_or(false),
+                    verdict_digest: verdict_digests.get(id).cloned(),
                 }
             })
             .collect();
@@ -375,6 +447,7 @@ impl Driver {
             waves_run,
             tasks,
             run_dir,
+            verification_degraded,
         })
     }
 }
@@ -572,6 +645,172 @@ fn parse_receipt_verdict(
     }
 }
 
+// --- Verifier wiring (DRV-04) ----------------------------------------------------
+
+/// Load `Vec<VerifierRegistration>` from the configured JSON file into a
+/// registry. Any problem — unreadable file, invalid JSON, rejected
+/// registration — is `InvalidConfig`: the driver never starts in a
+/// half-configured verifier mode.
+fn load_verifiers(path: &std::path::Path) -> Result<VerifierRegistry, DriverError> {
+    let bytes = std::fs::read(path).map_err(|e| {
+        DriverError::InvalidConfig(format!(
+            "verifiers_path unreadable {}: {e}",
+            path.display()
+        ))
+    })?;
+    let regs: Vec<VerifierRegistration> = serde_json::from_slice(&bytes).map_err(|e| {
+        DriverError::InvalidConfig(format!(
+            "verifiers_path {} is not a Vec<VerifierRegistration>: {e}",
+            path.display()
+        ))
+    })?;
+    let mut registry = VerifierRegistry::new();
+    for reg in regs {
+        let id = reg.id.clone();
+        registry.register(reg).map_err(|e| {
+            DriverError::InvalidConfig(format!("verifier registration '{id}' rejected: {e:?}"))
+        })?;
+    }
+    Ok(registry)
+}
+
+/// Capability matching rule: a predicate id like `"file-exists:one.txt"`
+/// matches verifiers whose capability is exactly `"file-exists"` — the part
+/// before the first `':'`. A predicate id with no `':'` matches verifiers
+/// whose capability equals the whole id. Matching is string equality, never
+/// prefix or substring.
+fn capability_of(predicate_id: &str) -> &str {
+    predicate_id.split(':').next().unwrap_or(predicate_id)
+}
+
+/// Run the registered verifiers for one task attempt and produce the
+/// verdict that gates the task.
+///
+/// For each acceptance predicate: look up verifiers for
+/// (task class, `capability_of(predicate id)`), execute each one bounded
+/// against the task's workspace, and turn every clean exit-0 run into one
+/// evidence link keyed by the capability. A verifier that fails its tests
+/// or fails infrastructurally produces no link — the predicate then
+/// evaluates per its `on_missing` policy, which is `Fail` when evidence is
+/// required, so a failed verifier can never gate a pass. `on_missing` is
+/// never mapped to PASS.
+///
+/// The receipt's claimed verdict is deliberately ignored here: the gate
+/// follows the verifiers, not the worker.
+fn verify_with_verifiers(
+    registry: &VerifierRegistry,
+    contract: &TaskContract,
+    workspace_path: &std::path::Path,
+) -> Result<fabric_verify::verdict::VerdictReceipt, DriverError> {
+    use fabric_verify::verdict::VerdictReceipt;
+    let task = contract.id.as_str().to_string();
+    if contract.acceptance.is_empty() {
+        // Unreachable: manifest loading requires non-empty acceptance, but
+        // fail typed rather than panic if the invariant ever breaks.
+        return Err(DriverError::VerificationFailed(
+            task,
+            "no acceptance predicates to verify".to_string(),
+        ));
+    }
+    let mut builder = VerdictBuilder::expect_predicates(
+        &task,
+        contract
+            .acceptance
+            .iter()
+            .map(|p| p.id.clone())
+            .collect(),
+    )
+    .map_err(|e| DriverError::VerificationFailed(task.clone(), format!("verdict setup: {e:?}")))?;
+
+    for pred in &contract.acceptance {
+        let cap = capability_of(&pred.id);
+        let verifiers = registry.lookup(&contract.class, &VerifierCapability(cap.to_string()));
+        let mut links: Vec<EvidenceLink> = Vec::new();
+        let mut first_command: Vec<String> = Vec::new();
+        let mut first_version = "none".to_string();
+        for (i, reg) in verifiers.iter().enumerate() {
+            if i == 0 {
+                first_command = reg.command.clone();
+                first_version = reg.version.clone();
+            }
+            // The child environment starts empty (env_allowlist is empty):
+            // secret-bearing variables never reach a verifier by default.
+            let outcome = execute(&ExecConfig {
+                argv: reg.command.clone(),
+                workdir: Some(workspace_path.to_path_buf()),
+                env_allowlist: Vec::new(),
+                timeout_ms: reg.timeout_ms,
+                max_output_bytes: reg.max_output_bytes,
+            })
+            .map_err(|e| {
+                DriverError::VerificationFailed(task.clone(), format!("verifier exec: {e:?}"))
+            })?;
+            // Only a clean exit-0 run becomes evidence. TestFailed and
+            // InfraFailed produce no link: the predicate then fails (or
+            // goes inconclusive) per its missing-evidence policy.
+            if let ExecOutcome::Passed(record) = outcome {
+                links.push(EvidenceLink {
+                    kind: cap.to_string(),
+                    reference: digest_bytes(&record.stdout).0,
+                });
+            }
+        }
+        let vp = VerifyPredicate {
+            id: pred.id.clone(),
+            description: pred.description.clone(),
+            required_evidence_kinds: if pred.evidence_required {
+                vec![cap.to_string()]
+            } else {
+                Vec::new()
+            },
+            on_missing: OnMissing::Fail,
+        };
+        let outcome = match evaluate(&vp, &links) {
+            PredicateOutcome::Pass { .. } => Verdict::Pass,
+            PredicateOutcome::Fail { .. } => Verdict::Fail,
+            PredicateOutcome::Inconclusive { .. } => Verdict::Inconclusive,
+        };
+        builder
+            .record(PredicateVerdict {
+                predicate_id: pred.id.clone(),
+                outcome,
+                command: first_command,
+                verifier_version: first_version,
+                evidence_digests: links.iter().map(|l| l.reference.clone()).collect(),
+            })
+            .map_err(|e| {
+                DriverError::VerificationFailed(task.clone(), format!("verdict record: {e:?}"))
+            })?;
+    }
+    let receipt: VerdictReceipt = builder
+        .finalize()
+        .map_err(|e| DriverError::VerificationFailed(task.clone(), format!("verdict: {e:?}")))?;
+    Ok(receipt)
+}
+
+/// Persist one verdict receipt under `<run_dir>/verdicts/<task>-a<attempt>.json`.
+fn write_verdict_receipt(
+    run_dir: &std::path::Path,
+    task_id: &TaskId,
+    attempt: u32,
+    receipt: &fabric_verify::verdict::VerdictReceipt,
+) -> Result<(), DriverError> {
+    let dir = run_dir.join("verdicts");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        DriverError::Record(format!("cannot create verdicts dir {}: {e}", dir.display()))
+    })?;
+    let path = dir.join(format!("{}-a{}.json", task_id.as_str(), attempt));
+    let bytes = serde_json::to_vec_pretty(receipt)
+        .map_err(|e| DriverError::Record(format!("verdict serialization: {e}")))?;
+    // Atomic: a reader never sees a half-written receipt.
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, &bytes)
+        .map_err(|e| DriverError::Record(format!("cannot write {}: {e}", tmp.display())))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| DriverError::Record(format!("cannot publish {}: {e}", path.display())))?;
+    Ok(())
+}
+
 // --- Events ---------------------------------------------------------------------
 
 fn persist_events(run_dir: &std::path::Path, log: &EventLog) -> Result<(), DriverError> {
@@ -653,6 +892,7 @@ mod tests {
             poll_interval_ms: 10,
             max_waves: 5,
             wave_timeout_ms: 10_000,
+            verifiers_path: None,
         }
     }
 
@@ -753,9 +993,13 @@ mod tests {
         assert_eq!(report.outcome, WaveOutcome::Complete);
         assert_eq!(report.waves_run, 2);
         assert_eq!(report.tasks.len(), 2);
+        // Degraded mode: no verifiers configured.
+        assert!(report.verification_degraded);
         for t in &report.tasks {
             assert_eq!(t.gate, "pass", "{t:?}");
             assert!(t.receipt_digest.as_deref().is_some_and(|s| s.starts_with("sha256:")));
+            assert!(!t.verified, "{t:?}");
+            assert!(t.verdict_digest.is_none(), "{t:?}");
         }
         // Outbox holds exactly two envelopes; inbox two receipts.
         let n_out = std::fs::read_dir(run_dir.join("outbox")).unwrap().count();
@@ -930,6 +1174,190 @@ mod tests {
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, bytes).unwrap();
         std::fs::rename(&tmp, path).unwrap();
+    }
+
+    #[test]
+    fn capability_matching_rule() {
+        // The part before the first ':'; no ':' means the whole id.
+        assert_eq!(capability_of("file-exists:one.txt"), "file-exists");
+        assert_eq!(capability_of("cargo-test"), "cargo-test");
+        assert_eq!(capability_of("a:b:c"), "a");
+        assert_eq!(capability_of(""), "");
+    }
+
+    fn write_verifiers_file(dir: &std::path::Path, command: &[&str]) -> PathBuf {
+        let reg = VerifierRegistration {
+            id: "v-file-exists".to_string(),
+            classes: vec![TaskClass::Implement],
+            capability: VerifierCapability("file-exists".to_string()),
+            command: command.iter().map(|s| s.to_string()).collect(),
+            version: "1".to_string(),
+            timeout_ms: 5_000,
+            max_output_bytes: 65_536,
+        };
+        let p = dir.join("verifiers.json");
+        std::fs::write(&p, serde_json::to_vec(&vec![reg]).unwrap()).unwrap();
+        p
+    }
+
+    fn manifest_capability_predicate(dir: &std::path::Path) -> PathBuf {
+        let m = serde_json::json!({ "leaf_tasks": [
+            {
+                "stable_id": "T001", "objective": "write out.txt",
+                "versioned_spec_reference": "r",
+                "allowed_scope": ["out.txt"], "inputs": ["i"], "outputs": ["out.txt"],
+                "dependencies": [], "acceptance_predicates": ["file-exists:out.txt"],
+                "verifier_ids": ["v"],
+            },
+        ]});
+        let p = dir.join("manifest.json");
+        std::fs::write(&p, serde_json::to_vec(&m).unwrap()).unwrap();
+        p
+    }
+
+    /// Seeder shared by verifier-mode tests: answers every envelope with a
+    /// pass-claim receipt. In verifier mode the claim is ignored; the gate
+    /// follows the verifiers.
+    fn spawn_pass_seeder(run_dir: PathBuf) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                let outbox = run_dir.join("outbox");
+                if outbox.is_dir() {
+                    for entry in std::fs::read_dir(&outbox).unwrap() {
+                        let entry = entry.unwrap();
+                        let name = entry.file_name().to_str().unwrap().to_string();
+                        if !name.ends_with(".json") || name.ends_with(".receipt.json") {
+                            continue;
+                        }
+                        let digest = name.trim_end_matches(".json").to_string();
+                        let rp = run_dir.join("inbox").join(format!("{digest}.receipt.json"));
+                        if !rp.exists() {
+                            let body = serde_json::json!({
+                                "envelope_digest": digest,
+                                "verdict": "pass",
+                            });
+                            write_atomic_test(&rp, &serde_json::to_vec(&body).unwrap());
+                        }
+                    }
+                }
+                if std::time::Instant::now() > deadline || run_dir.join("DONE").exists() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        })
+    }
+
+    #[test]
+    fn malformed_verifiers_file_is_invalid_config() {
+        let d = tmpdir("badver");
+        let manifest = manifest_two_tasks(&d);
+
+        // Garbage JSON.
+        let bad = d.join("bad.json");
+        std::fs::write(&bad, b"{not json").unwrap();
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = Some(bad);
+        assert!(matches!(
+            Driver::new(cfg),
+            Err(DriverError::InvalidConfig(_))
+        ));
+
+        // Valid JSON, wrong shape.
+        let bad = d.join("shape.json");
+        std::fs::write(&bad, br#"{"nope": 1}"#).unwrap();
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = Some(bad);
+        assert!(matches!(
+            Driver::new(cfg),
+            Err(DriverError::InvalidConfig(_))
+        ));
+
+        // Registration the registry rejects (empty id).
+        let bad = d.join("reg.json");
+        let reg = serde_json::json!([{
+            "id": "", "classes": ["IMPLEMENT"],
+            "capability": "file-exists", "command": ["true"],
+            "version": "1", "timeout_ms": 1000, "max_output_bytes": 1024,
+        }]);
+        std::fs::write(&bad, serde_json::to_vec(&reg).unwrap()).unwrap();
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = Some(bad);
+        assert!(matches!(
+            Driver::new(cfg),
+            Err(DriverError::InvalidConfig(_))
+        ));
+
+        // Missing file.
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = Some(d.join("missing.json"));
+        assert!(matches!(
+            Driver::new(cfg),
+            Err(DriverError::InvalidConfig(_))
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn verifier_mode_pass_verdict_gates_pass() {
+        let d = tmpdir("verpass");
+        let manifest = manifest_capability_predicate(&d);
+        let verifiers = write_verifiers_file(&d, &["sh", "-c", "exit 0"]);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = Some(verifiers);
+        let driver = Driver::new(cfg).unwrap();
+
+        let run_dir = d.join("run");
+        let seeder = spawn_pass_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+
+        assert_eq!(report.outcome, WaveOutcome::Complete);
+        assert!(!report.verification_degraded);
+        let t = &report.tasks[0];
+        // The gate follows the verifier, not the receipt claim.
+        assert_eq!(t.gate, "pass", "{t:?}");
+        assert!(t.verified, "{t:?}");
+        assert!(
+            t.verdict_digest.as_deref().is_some_and(|s| s.starts_with("fnv1a64:")),
+            "{t:?}"
+        );
+        // The verdict receipt was persisted.
+        let vf = run_dir.join("verdicts").join("T001-a1.json");
+        assert!(vf.is_file(), "missing {vf:?}");
+        let vr: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&vf).unwrap()).unwrap();
+        assert_eq!(vr["overall"], "PASS");
+        assert_eq!(vr["predicates"][0]["predicate_id"], "file-exists:out.txt");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn verifier_mode_failing_verifier_keeps_gate_unpassed() {
+        let d = tmpdir("verfail");
+        let manifest = manifest_capability_predicate(&d);
+        let verifiers = write_verifiers_file(&d, &["sh", "-c", "exit 1"]);
+        let mut cfg = config_for(&d, &manifest);
+        cfg.verifiers_path = Some(verifiers);
+        cfg.max_waves = 1;
+        let driver = Driver::new(cfg).unwrap();
+
+        let run_dir = d.join("run");
+        let seeder = spawn_pass_seeder(run_dir.clone());
+        let report = driver.run().unwrap();
+        std::fs::write(run_dir.join("DONE"), b"1").unwrap();
+        seeder.join().unwrap();
+
+        // The worker claimed pass, but the verifier failed: the gate must
+        // not be pass. The driver does not invent retries; the fail verdict
+        // gates the task.
+        let t = &report.tasks[0];
+        assert_eq!(t.gate, "fail", "{t:?}");
+        assert!(t.verified, "{t:?}");
+        assert!(t.verdict_digest.is_some(), "{t:?}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
