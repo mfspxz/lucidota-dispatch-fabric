@@ -1,0 +1,17 @@
+[package]
+name = "fabric-driver"
+version = "0.1.0"
+edition = "2021"
+description = "Self-hosting build driver for the dispatch fabric — the work-order loop (plan, dispatch, collect, verify, integrate) over the dead-drop protocol"
+
+[dependencies]
+fabric-types = { path = "../fabric-types" }
+fabric-graph = { path = "../fabric-graph" }
+fabric-dispatch = { path = "../fabric-dispatch" }
+fabric-workspace = { path = "../fabric-workspace" }
+fabric-records = { path = "../fabric-records" }
+fabric-verify = { path = "../fabric-verify" }
+fabric-organelles = { path = "../fabric-organelles" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
