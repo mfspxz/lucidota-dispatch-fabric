@@ -8,6 +8,7 @@
 
 use fabric_types::{FabricError, Result, Scope, TaskContract};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// Result of checking a task's changed paths against its allowed scope.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +113,186 @@ pub fn check_scope_paths(scope: &Scope, changed_paths: &[impl AsRef<str>]) -> Ve
         .collect()
 }
 
+/// List paths changed inside the workspace, relative to the workspace root.
+///
+/// Runs `git -C <workspace> status --porcelain=v1`; untracked, modified,
+/// and staged changes all count. Fail-closed: any git failure, non-UTF-8
+/// output, or unparseable entry is an `Err` — never a silently empty list.
+/// (An empty `Ok` means a genuinely clean tree.)
+pub fn workspace_changed_paths(workspace: &Path) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .output()
+        .map_err(|e| {
+            FabricError::VerificationFailure(format!(
+                "scope diff: git status failed to spawn for {}: {e}",
+                workspace.display()
+            ))
+        })?;
+    if !out.status.success() {
+        return Err(FabricError::VerificationFailure(format!(
+            "scope diff: git status failed for {}: {}",
+            workspace.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let text = String::from_utf8(out.stdout).map_err(|e| {
+        FabricError::VerificationFailure(format!("scope diff: git status output not UTF-8: {e}"))
+    })?;
+    parse_porcelain(&text)
+}
+
+/// Parse `git status --porcelain=v1` output into workspace-relative paths.
+/// Rename/copy entries (`R  old -> new`, quoted or bare) yield the
+/// destination path.
+fn parse_porcelain(text: &str) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        if line.len() < 4 || line.as_bytes()[2] != b' ' {
+            return Err(FabricError::VerificationFailure(format!(
+                "scope diff: unparseable porcelain line {line:?}"
+            )));
+        }
+        paths.push(parse_path_spec(&line[3..])?);
+    }
+    Ok(paths)
+}
+
+/// Parse one porcelain path spec: bare, C-quoted, or a rename pair
+/// (`old -> new`, each side bare or quoted). Returns the effective path —
+/// the rename destination when present.
+fn parse_path_spec(spec: &str) -> Result<String> {
+    let spec = spec.trim();
+    // A rename pair is `old -> new` with each side independently bare or
+    // C-quoted (git quotes each path on its own merits). Find the last
+    // ` -> ` outside quotes; the right side is the rename destination.
+    // (A bare filename cannot contain an unquoted ` -> `.)
+    let bytes = spec.as_bytes();
+    let mut in_quotes = false;
+    let mut escaped = false;
+    let mut split_at: Option<usize> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if escaped {
+            escaped = false;
+        } else if b == b'\\' && in_quotes {
+            escaped = true;
+        } else if b == b'"' {
+            in_quotes = !in_quotes;
+        } else if !in_quotes && spec[i..].starts_with(" -> ") {
+            split_at = Some(i);
+        }
+        i += 1;
+    }
+    let target = match split_at {
+        Some(at) => spec[at + 4..].trim(),
+        None => spec,
+    };
+    if let Some(inner) = target.strip_prefix('"') {
+        let (quoted, _) = split_quoted(inner)?;
+        unquote_c(&quoted)
+    } else {
+        Ok(target.to_string())
+    }
+}
+
+/// Split `"...` at the closing unescaped quote. Returns (inner, rest).
+fn split_quoted(s: &str) -> Result<(String, String)> {
+    let bytes = s.as_bytes();
+    let mut inner = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if i + 1 < bytes.len() => {
+                inner.push(bytes[i]);
+                inner.push(bytes[i + 1]);
+                i += 2;
+            }
+            b'"' => {
+                let rest = s[i + 1..].to_string();
+                let inner = String::from_utf8(inner).map_err(|_| {
+                    FabricError::VerificationFailure(
+                        "scope diff: quoted path not UTF-8".to_string(),
+                    )
+                })?;
+                return Ok((inner, rest));
+            }
+            b => {
+                inner.push(b);
+                i += 1;
+            }
+        }
+    }
+    Err(FabricError::VerificationFailure(
+        "scope diff: unterminated quoted path".to_string(),
+    ))
+}
+
+/// Undo git's C-style quoting: `\\`, `\"`, `\n`, `\t`, `\r`, and octal
+/// `\ooo` byte escapes. Fail-closed on invalid UTF-8 or bad escapes.
+fn unquote_c(s: &str) -> Result<String> {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i >= bytes.len() {
+            return Err(FabricError::VerificationFailure(
+                "scope diff: trailing backslash in quoted path".to_string(),
+            ));
+        }
+        match bytes[i] {
+            b'\\' => out.push(b'\\'),
+            b'"' => out.push(b'"'),
+            b'n' => out.push(b'\n'),
+            b't' => out.push(b'\t'),
+            b'r' => out.push(b'\r'),
+            b'0'..=b'7' => {
+                if i + 2 >= bytes.len() {
+                    return Err(FabricError::VerificationFailure(
+                        "scope diff: truncated octal escape".to_string(),
+                    ));
+                }
+                let mut val: u32 = 0;
+                for k in 0..3 {
+                    let d = bytes[i + k];
+                    if !(b'0'..=b'7').contains(&d) {
+                        return Err(FabricError::VerificationFailure(
+                            "scope diff: bad octal escape".to_string(),
+                        ));
+                    }
+                    val = val * 8 + (d - b'0') as u32;
+                }
+                if val > 255 {
+                    return Err(FabricError::VerificationFailure(
+                        "scope diff: octal escape out of range".to_string(),
+                    ));
+                }
+                out.push(val as u8);
+                i += 2;
+            }
+            other => {
+                return Err(FabricError::VerificationFailure(format!(
+                    "scope diff: unknown escape \\{}",
+                    other as char
+                )));
+            }
+        }
+        i += 1;
+    }
+    String::from_utf8(out).map_err(|_| {
+        FabricError::VerificationFailure("scope diff: quoted path not UTF-8".to_string())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +367,138 @@ mod tests {
         let scope = Scope::new(vec!["crates/a".to_string()]).unwrap();
         let v = check_scope_paths(&scope, &["crates/a/x.rs", "crates/b/y.rs"]);
         assert_eq!(v, vec!["crates/b/y.rs".to_string()]);
+    }
+
+    // --- workspace_changed_paths (FIX-1) ---
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SCOPE_TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// A fresh git repo in the system temp dir (outside any other repo).
+    fn temp_git_repo(tag: &str) -> std::path::PathBuf {
+        let n = SCOPE_TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!(
+            "fix1-scope-{tag}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "test@fabric"]);
+        git(&["config", "user.name", "fabric-test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("base.txt"), b"base\n").unwrap();
+        git(&["add", "base.txt"]);
+        git(&["commit", "-q", "-m", "base"]);
+        dir
+    }
+
+    #[test]
+    fn workspace_diff_lists_untracked_modified_and_staged() {
+        let dir = temp_git_repo("all");
+        // Untracked.
+        std::fs::write(dir.join("new.txt"), b"new\n").unwrap();
+        // Modified (unstaged).
+        std::fs::write(dir.join("base.txt"), b"changed\n").unwrap();
+        // Staged new file.
+        std::fs::write(dir.join("staged.txt"), b"staged\n").unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["add", "staged.txt"])
+            .output()
+            .unwrap();
+
+        let mut paths = workspace_changed_paths(&dir).unwrap();
+        paths.sort();
+        assert_eq!(paths, vec!["base.txt", "new.txt", "staged.txt"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn workspace_diff_empty_when_clean() {
+        let dir = temp_git_repo("clean");
+        assert_eq!(workspace_changed_paths(&dir).unwrap(), Vec::<String>::new());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn workspace_diff_git_failure_is_error() {
+        // Not a git repo: fail-closed, never a silently empty list.
+        let dir = std::env::temp_dir().join(format!(
+            "fix1-scope-notrepo-{}-{}",
+            std::process::id(),
+            SCOPE_TEST_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let err = workspace_changed_paths(&dir).unwrap_err();
+        assert!(
+            matches!(err, FabricError::VerificationFailure(_)),
+            "expected VerificationFailure, got {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn workspace_diff_parses_renames_and_quoted_paths() {
+        let dir = temp_git_repo("quoting");
+        // Rename a tracked file (staged rename).
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["mv", "base.txt", "renamed.txt"])
+            .output()
+            .unwrap();
+        // Untracked file with a space (git quotes it in porcelain).
+        std::fs::write(dir.join("with space.txt"), b"x\n").unwrap();
+
+        let mut paths = workspace_changed_paths(&dir).unwrap();
+        paths.sort();
+        assert_eq!(paths, vec!["renamed.txt", "with space.txt"], "got {paths:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn porcelain_parser_unit_cases() {
+        // Bare entries.
+        assert_eq!(parse_porcelain("M  a.txt\n?? b.txt\n").unwrap(), vec!["a.txt", "b.txt"]);
+        // Bare rename yields the destination.
+        assert_eq!(
+            parse_porcelain("R  old.txt -> new.txt\n").unwrap(),
+            vec!["new.txt"]
+        );
+        // Quoted rename yields the unquoted destination.
+        assert_eq!(
+            parse_porcelain("R  \"old name.txt\" -> \"new name.txt\"\n").unwrap(),
+            vec!["new name.txt"]
+        );
+        // Mixed quoting (git quotes each side independently).
+        assert_eq!(
+            parse_porcelain("R  old.txt -> \"new name.txt\"\n").unwrap(),
+            vec!["new name.txt"]
+        );
+        assert_eq!(
+            parse_porcelain("R  \"old name.txt\" -> new.txt\n").unwrap(),
+            vec!["new.txt"]
+        );
+        // Octal escape (git quotes non-ASCII bytes as \ooo).
+        assert_eq!(
+            parse_porcelain("?? \"caf\\303\\251.txt\"\n").unwrap(),
+            vec!["caf\u{e9}.txt"]
+        );
+        // Malformed line is fail-closed.
+        assert!(parse_porcelain("XY\n").is_err());
+        assert!(parse_porcelain("?? \"unterminated\n").is_err());
     }
 }
